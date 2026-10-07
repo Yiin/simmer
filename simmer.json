@@ -1,0 +1,6 @@
+{
+  "base": "main",
+  "gate": "bun install --frozen-lockfile && bun run gate",
+  "push": true,
+  "harness": "claude"
+}
