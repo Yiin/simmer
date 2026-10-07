@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { spawn } from 'node:child_process'
 import {
   existsSync,
@@ -26,8 +26,18 @@ const cliPath = join(import.meta.dir, '../src/cli.ts')
 let directory: string
 let repository: string
 let environment: NodeJS.ProcessEnv
+type StartedRun = {
+  completion: Promise<{ exitCode: number | null; stdout: string; stderr: string }>
+  pid: number
+  isRunning: () => boolean
+  kill: () => void
+  signal: (signal: NodeJS.Signals) => void
+}
+let trackedRuns: Set<StartedRun>
+const leakedForCleanupHook: number[] = []
 
 beforeEach(() => {
+  trackedRuns = new Set()
   directory = mkdtempSync('/tmp/simmer-run-test-')
   repository = join(directory, 'repo')
   mkdirSync(repository)
@@ -198,9 +208,13 @@ process.stdout.write(JSON.stringify({ type: 'turn.completed',
   )
 })
 
-afterEach(() => {
-  rmSync(directory, { recursive: true, force: true })
-})
+afterEach(async () => {
+  try {
+    await reap()
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+}, 10000)
 
 function binary(name: string, source: string) {
   writeFileSync(join(directory, 'bin', name), `#!${process.execPath}\n${source}`, { mode: 0o755 })
@@ -274,7 +288,7 @@ async function waitForPause() {
   expect(existsSync(join(directory, 'paused'))).toBe(true)
 }
 
-function startRun(commandArguments = ['run', 'epic', '--json']) {
+function startRun(commandArguments = ['run', 'epic', '--json']): StartedRun {
   const processHandle = spawn(process.execPath, [cliPath, ...commandArguments], {
     cwd: repository,
     env: environment,
@@ -295,22 +309,130 @@ function startRun(commandArguments = ['run', 'epic', '--json']) {
       processHandle.on('close', (exitCode) => resolve({ exitCode, stdout, stderr }))
     }
   )
+  if (processHandle.pid === undefined) throw new Error('spawn did not return a pid')
+  const pid = processHandle.pid
+  function isRunning(): boolean {
+    return processHandle.exitCode === null && processHandle.signalCode === null
+  }
   function kill() {
-    if (processHandle.pid && processHandle.exitCode === null && processHandle.signalCode === null) {
-      process.kill(-processHandle.pid, 'SIGKILL')
+    if (isRunning()) {
+      killQuietly(-pid)
       if (existsSync(join(directory, 'paused'))) {
         const pausedId = Number(readFileSync(join(directory, 'paused'), 'utf8'))
-        for (const targetId of [-pausedId, pausedId]) {
-          try {
-            process.kill(targetId, 'SIGKILL')
-          } catch (error) {
-            if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
-          }
+        if (Number.isSafeInteger(pausedId) && pausedId > 0) {
+          killQuietly(-pausedId)
+          killQuietly(pausedId)
         }
       }
     }
   }
-  return { completion, kill, signal: (signal: NodeJS.Signals) => processHandle.kill(signal) }
+  const handle = {
+    completion,
+    pid,
+    isRunning,
+    kill,
+    signal: (signal: NodeJS.Signals) => processHandle.kill(signal)
+  }
+  trackedRuns.add(handle)
+  return handle
+}
+
+function killQuietly(targetId: number) {
+  try {
+    process.kill(targetId, 'SIGKILL')
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
+  }
+}
+
+type ProcessEntry = { pid: number; pgid: number; stat: string; command: string }
+
+function listProcesses(): ProcessEntry[] {
+  const result = Bun.spawnSync(['ps', '-A', '-ww', '-o', 'pid=,pgid=,stat=,command='], {
+    timeout: 1000
+  })
+  if (result.exitedDueToTimeout) {
+    throw new Error('ps timed out after 1000ms')
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(`ps failed (exit ${result.exitCode}): ${result.stderr.toString()}`)
+  }
+  return result.stdout
+    .toString()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line)
+      if (!match) throw new Error(`Unparseable ps line: ${JSON.stringify(line)}`)
+      const [pid, pgid, stat, command] = [match[1], match[2], match[3], match[4]]
+      if (pid === undefined || pgid === undefined || stat === undefined || command === undefined) {
+        throw new Error(`Unparseable ps line: ${JSON.stringify(line)}`)
+      }
+      return { pid: Number(pid), pgid: Number(pgid), stat, command }
+    })
+}
+
+function isDeadOrZombie(pid: number): boolean {
+  const entry = listProcesses().find((candidate) => candidate.pid === pid)
+  return entry === undefined || entry.stat.startsWith('Z')
+}
+
+async function waitUntilDeadOrZombie(pid: number, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!isDeadOrZombie(pid) && Date.now() < deadline) await Bun.sleep(10)
+  expect(isDeadOrZombie(pid)).toBe(true)
+}
+
+async function sweepWorkers(): Promise<void> {
+  const deadline = Date.now() + 3000
+  while (true) {
+    const processes = listProcesses()
+    const runner = processes.find((entry) => entry.pid === process.pid)
+    if (!runner) throw new Error('Could not find the test runner itself in ps output')
+    const live = processes.filter(
+      (entry) =>
+        entry.pid !== process.pid &&
+        entry.command.includes(`${directory}/`) &&
+        !entry.stat.startsWith('Z')
+    )
+    if (live.length === 0) return
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Workers still alive after cleanup: ${live
+          .map((entry) => `${entry.pid} ${entry.command}`)
+          .join(', ')}`
+      )
+    }
+    for (const worker of live) {
+      killQuietly(worker.pgid === runner.pgid ? worker.pid : -worker.pgid)
+    }
+    await Bun.sleep(20)
+  }
+}
+
+async function awaitBounded<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Timed out after ${timeoutMs}ms waiting for ${label}`)),
+      timeoutMs
+    )
+  })
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function reap(): Promise<void> {
+  for (const run of trackedRuns) {
+    if (run.isRunning()) killQuietly(-run.pid)
+  }
+  await sweepWorkers()
+  const completions = [...trackedRuns].map((run) => run.completion)
+  trackedRuns.clear()
+  await awaitBounded(Promise.all(completions), 2000, 'tracked run completions')
 }
 
 test('one blocked child does not stop two other children from landing', () => {
@@ -1070,7 +1192,8 @@ test.each(['run', 'child'])(
         `
 import { spawn } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
-const descendant = spawn(${JSON.stringify(process.execPath)}, ['-e', 'setInterval(() => {}, 1000)'],
+const descendant = spawn(${JSON.stringify(process.execPath)},
+  ['-e', 'setInterval(() => {}, 1000)', ${JSON.stringify(`${directory}/`)}],
   { detached: true, stdio: 'ignore' })
 writeFileSync(${JSON.stringify(join(directory, 'descendant.pid'))}, String(descendant.pid))
 writeFileSync(${JSON.stringify(join(directory, 'paused'))}, String(process.pid))
@@ -1099,12 +1222,6 @@ setInterval(() => {}, 1000)
       } finally {
         first.kill()
         await first.completion
-        for (const marker of ['paused', 'descendant.pid']) {
-          const processId = Number(readFileSync(join(directory, marker), 'utf8'))
-          try {
-            process.kill(processId, 'SIGKILL')
-          } catch {}
-        }
       }
     }
   },
@@ -1439,3 +1556,108 @@ test.each([false, true])(
     expect(calls().filter((call) => call.input.includes('simmer: dropped'))).toHaveLength(1)
   }
 )
+
+test('cleanup kills a worker whose detached parent already exited', async () => {
+  save([child(1)])
+  binary('sleeper', 'setInterval(() => {}, 1000)')
+  binary(
+    'codex',
+    `
+import { spawn } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+const sleeper = spawn(${JSON.stringify(join(directory, 'bin', 'sleeper'))}, [],
+  { detached: true, stdio: 'ignore' })
+writeFileSync(${JSON.stringify(join(directory, 'sleeper.pid'))}, String(sleeper.pid))
+process.stdout.write(JSON.stringify({ type: 'turn.completed',
+  usage: { input_tokens: 1, output_tokens: 1 } }) + '\\n')
+process.exit(0)
+`
+  )
+  const result = run()
+  expect(result.exitCode).toBe(4)
+  const sleeperId = Number(readFileSync(join(directory, 'sleeper.pid'), 'utf8'))
+  expect(isDeadOrZombie(sleeperId)).toBe(false)
+  await reap()
+  expect(isDeadOrZombie(sleeperId)).toBe(true)
+})
+
+test('the cleanup hook kills detached workers after the paused marker is overwritten', async () => {
+  save([child(1)])
+  binary('sleeper', 'setInterval(() => {}, 1000)')
+  binary(
+    'codex',
+    `
+import { spawn } from 'node:child_process'
+import { existsSync, writeFileSync } from 'node:fs'
+function sleeper() {
+  return spawn(${JSON.stringify(join(directory, 'bin', 'sleeper'))}, [],
+    { detached: true, stdio: 'ignore' })
+}
+const firstSleeper = sleeper()
+writeFileSync(${JSON.stringify(join(directory, 'sleeper-1.pid'))}, String(firstSleeper.pid))
+writeFileSync(${JSON.stringify(join(directory, 'paused'))}, String(firstSleeper.pid))
+const secondSleeper = sleeper()
+writeFileSync(${JSON.stringify(join(directory, 'sleeper-2.pid'))}, String(secondSleeper.pid))
+writeFileSync(${JSON.stringify(join(directory, 'paused'))}, String(secondSleeper.pid))
+while (!existsSync(${JSON.stringify(join(directory, 'resume'))})) await Bun.sleep(10)
+`
+  )
+  const first = startRun()
+  try {
+    await waitForPause()
+    const deadline = Date.now() + 5000
+    while (
+      (!existsSync(join(directory, 'sleeper-1.pid')) ||
+        !existsSync(join(directory, 'sleeper-2.pid'))) &&
+      Date.now() < deadline
+    ) {
+      await Bun.sleep(10)
+    }
+    const firstSleeperId = Number(readFileSync(join(directory, 'sleeper-1.pid'), 'utf8'))
+    const secondSleeperId = Number(readFileSync(join(directory, 'sleeper-2.pid'), 'utf8'))
+    while (
+      readFileSync(join(directory, 'paused'), 'utf8') !== String(secondSleeperId) &&
+      Date.now() < deadline
+    ) {
+      await Bun.sleep(10)
+    }
+    expect(readFileSync(join(directory, 'paused'), 'utf8')).toBe(String(secondSleeperId))
+    first.kill()
+    await first.completion
+    await waitUntilDeadOrZombie(secondSleeperId)
+    leakedForCleanupHook.push(firstSleeperId)
+  } finally {
+    first.kill()
+    await first.completion
+  }
+}, 15000)
+
+test('cleanup kills a worker that never writes the paused marker', async () => {
+  save([child(1)])
+  binary(
+    'codex',
+    `
+import { writeFileSync } from 'node:fs'
+writeFileSync(${JSON.stringify(join(directory, 'started'))}, String(process.pid))
+setInterval(() => {}, 1000)
+`
+  )
+  startRun()
+  try {
+    const deadline = Date.now() + 5000
+    while (!existsSync(join(directory, 'started')) && Date.now() < deadline) await Bun.sleep(10)
+    expect(existsSync(join(directory, 'started'))).toBe(true)
+    expect(existsSync(join(directory, 'paused'))).toBe(false)
+    const codexId = Number(readFileSync(join(directory, 'started'), 'utf8'))
+    await reap()
+    expect(isDeadOrZombie(codexId)).toBe(true)
+  } finally {
+    await reap()
+  }
+}, 15000)
+
+afterAll(() => {
+  for (const pid of leakedForCleanupHook) {
+    expect(isDeadOrZombie(pid)).toBe(true)
+  }
+})
