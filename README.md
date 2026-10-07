@@ -86,6 +86,14 @@ Nothing is kept in memory across commands. `simmer run <epic>` after a crash fin
 
 Each adapter returns the exit status, the final message, and token usage.
 
+## Install
+
+```
+bash scripts/install.sh
+```
+
+It clones or updates `~/Projects/simmer`, installs dependencies, writes the `~/.local/bin/simmer` shim, and points the `cook-it` and `cook-epic` skills in `~/.agents/skills` and `~/.claude/skills` at this repo. Run it again to update. To install on another machine: `ssh <host> 'bash -s' < scripts/install.sh`.
+
 ## Requirements
 
 - bd 1.3.1 or later (claim leases and compare-and-set)
