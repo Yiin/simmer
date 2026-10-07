@@ -19,7 +19,7 @@ export async function runEpic(options: {
   const bd = new Bd({ cwd, actor: `simmer-run-${process.pid}`, signal: options.signal })
   const git = new Git({ cwd, base: config.base })
   const lock = join(await git.temporaryDirectory(), `${epic}.lock`)
-  acquireLock(lock, epic)
+  const identity = acquireLock(lock, epic)
   const counts = { done: 0, blocked: 0, lost: 0, errors: 0, deferred: 0 }
   function event(type: string, details: Record<string, unknown> = {}) {
     process.stdout.write(
@@ -222,7 +222,7 @@ export async function runEpic(options: {
     throw error
   } finally {
     try {
-      if (readFileSync(lock, 'utf8') === String(process.pid)) unlinkSync(lock)
+      if (readFileSync(lock, 'utf8') === identity) unlinkSync(lock)
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
         process.stderr.write(`Lock release: ${errorMessage(error)}\n`)
@@ -231,21 +231,22 @@ export async function runEpic(options: {
   }
 }
 
-function acquireLock(path: string, epic: string) {
+function acquireLock(path: string, epic: string): string {
+  const identity = lockIdentity()
   const candidate = `${path}.${randomUUID()}`
-  writeFileSync(candidate, String(process.pid), { flag: 'wx' })
+  writeFileSync(candidate, identity, { flag: 'wx' })
   try {
     while (true) {
       try {
         linkSync(candidate, path)
-        return
+        return identity
       } catch (error) {
         if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') throw error
       }
       try {
         const existing = statSync(path)
-        const pid = Number(readFileSync(path, 'utf8'))
-        if (pidIsAlive(pid)) throw new Error(`simmer run ${epic} is already running (pid ${pid})`)
+        const pid = liveOwnerPid(readFileSync(path, 'utf8'))
+        if (pid !== undefined) throw new Error(`simmer run ${epic} is already running (pid ${pid})`)
         let recoveryLock = `${path}.reclaim-${existing.ino}`
         while (true) {
           try {
@@ -253,8 +254,8 @@ function acquireLock(path: string, epic: string) {
           } catch (error) {
             if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST')
               throw error
-            const recoveryPid = Number(readFileSync(recoveryLock, 'utf8'))
-            if (pidIsAlive(recoveryPid)) {
+            const recoveryPid = liveOwnerPid(readFileSync(recoveryLock, 'utf8'))
+            if (recoveryPid !== undefined) {
               throw new Error(`simmer run ${epic} is already running (pid ${recoveryPid})`)
             }
             recoveryLock += `-${statSync(recoveryLock).ino}`
@@ -264,7 +265,7 @@ function acquireLock(path: string, epic: string) {
             if (statSync(path).ino === existing.ino) unlinkSync(path)
             try {
               linkSync(candidate, path)
-              return
+              return identity
             } catch (error) {
               if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST')
                 throw error
@@ -281,6 +282,47 @@ function acquireLock(path: string, epic: string) {
   } finally {
     unlinkSync(candidate)
   }
+}
+
+function lockIdentity(): string {
+  const startTime = readProcessStartTime(process.pid)
+  return startTime === undefined ? `${process.pid}` : `${process.pid} ${startTime}`
+}
+
+function parseLock(text: string): { pid: number; start?: string } | undefined {
+  const match = /^(\d+)(?: (\d+))?$/.exec(text.trim())
+  if (!match) return undefined
+  const pid = Number(match[1])
+  if (!Number.isSafeInteger(pid) || pid <= 0) return undefined
+  return { pid, start: match[2] }
+}
+
+function liveOwnerPid(lockText: string): number | undefined {
+  const parsed = parseLock(lockText)
+  if (!parsed || !pidIsAlive(parsed.pid)) return undefined
+  if (parsed.start === undefined) return parsed.pid
+  const actualStart = readProcessStartTime(parsed.pid)
+  if (actualStart === undefined || actualStart === parsed.start) return parsed.pid
+  return undefined
+}
+
+/** Field 22 (starttime) of /proc/PID/stat; comm (field 2) can itself contain spaces and parentheses. */
+function readProcessStartTime(pid: number): string | undefined {
+  if (process.platform !== 'linux') return undefined
+  let stat: string
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+  } catch {
+    return undefined
+  }
+  const commEnd = stat.lastIndexOf(')')
+  if (commEnd === -1) return undefined
+  const fields = stat
+    .slice(commEnd + 1)
+    .trim()
+    .split(/\s+/)
+  const startTime = fields[19]
+  return startTime !== undefined && /^\d+$/.test(startTime) ? startTime : undefined
 }
 
 function pidIsAlive(pid: number): boolean {

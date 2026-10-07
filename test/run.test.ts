@@ -257,6 +257,17 @@ function calls(): { arguments: string[]; input: string }[] {
     .map((line) => JSON.parse(line))
 }
 
+function procStartTime(pid: number): string {
+  const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+  const fields = stat
+    .slice(stat.lastIndexOf(')') + 1)
+    .trim()
+    .split(/\s+/)
+  const startTime = fields[19]
+  if (startTime === undefined) throw new Error(`Missing start time for pid ${pid}`)
+  return startTime
+}
+
 async function waitForPause() {
   const deadline = Date.now() + 5000
   while (!existsSync(join(directory, 'paused')) && Date.now() < deadline) await Bun.sleep(10)
@@ -382,10 +393,14 @@ test('a concurrent run is refused without changing bd state', async () => {
     await waitForPause()
     const before = calls().length
     const lock = readFileSync(join(repository, '.git/simmer-tmp/epic.lock'), 'utf8')
+    const [, pid, start] = /^(\d+)(?: (\d+))?$/.exec(lock) ?? []
+    if (process.platform === 'linux') {
+      expect(start).toBe(procStartTime(Number(pid)))
+    }
     expect(run()).toEqual({
       exitCode: 1,
       stdout: '',
-      stderr: `simmer run epic is already running (pid ${lock})\n`
+      stderr: `simmer run epic is already running (pid ${pid})\n`
     })
     expect(calls()).toHaveLength(before)
     writeFileSync(join(directory, 'resume'), '')
@@ -397,6 +412,32 @@ test('a concurrent run is refused without changing bd state', async () => {
     await first.completion
   }
 }, 15000)
+
+test.skipIf(process.platform !== 'linux')(
+  'a run preserves a lock whose start time changed before release',
+  async () => {
+    save([child(1, 'pause')])
+    const first = startRun()
+    try {
+      await waitForPause()
+      const lock = join(repository, '.git/simmer-tmp/epic.lock')
+      const [pid, start] = readFileSync(lock, 'utf8').split(' ')
+      expect(start).toBe(procStartTime(Number(pid)))
+      if (start === undefined) throw new Error('Missing lock start time')
+      const replacement = `${pid} ${BigInt(start) + 1n}`
+      writeFileSync(lock, replacement)
+      writeFileSync(join(directory, 'resume'), '')
+      const result = await first.completion
+      expect(result.exitCode).toBe(0)
+      expect(result.stderr).toBe('')
+      expect(readFileSync(lock, 'utf8')).toBe(replacement)
+    } finally {
+      first.kill()
+      await first.completion
+    }
+  },
+  15000
+)
 
 test('status prints bd categories, assignees, lease states, and current deferrals', () => {
   save(
@@ -800,6 +841,104 @@ test('an interrupted stale-lock takeover does not prevent a later run', () => {
   expect(result.stderr).toBe('')
   expect(existsSync(lock)).toBe(false)
 })
+
+test.skipIf(process.platform !== 'linux')(
+  'a lock naming a live pid with the wrong start time is taken over as stale',
+  () => {
+    save([])
+    mkdirSync(join(repository, '.git/simmer-tmp'))
+    const lock = join(repository, '.git/simmer-tmp/epic.lock')
+    writeFileSync(lock, `${process.pid} ${BigInt(procStartTime(process.pid)) + 1n}`)
+    const result = run()
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(existsSync(lock)).toBe(false)
+  }
+)
+
+test.skipIf(process.platform !== 'linux')(
+  'a lock naming a live pid with the correct start time is refused without touching bd',
+  () => {
+    save([])
+    mkdirSync(join(repository, '.git/simmer-tmp'))
+    const lock = join(repository, '.git/simmer-tmp/epic.lock')
+    writeFileSync(lock, `${process.pid} ${procStartTime(process.pid)}`)
+    const result = run()
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: `simmer run epic is already running (pid ${process.pid})\n`
+    })
+    expect(existsSync(join(directory, 'calls.jsonl'))).toBe(false)
+    expect(readFileSync(lock, 'utf8')).toBe(`${process.pid} ${procStartTime(process.pid)}`)
+  }
+)
+
+test('a legacy pid-only lock naming a live process is refused', () => {
+  save([])
+  mkdirSync(join(repository, '.git/simmer-tmp'))
+  const lock = join(repository, '.git/simmer-tmp/epic.lock')
+  writeFileSync(lock, `${process.pid}`)
+  const result = run()
+  expect(result).toEqual({
+    exitCode: 1,
+    stdout: '',
+    stderr: `simmer run epic is already running (pid ${process.pid})\n`
+  })
+  expect(readFileSync(lock, 'utf8')).toBe(`${process.pid}`)
+})
+
+test('a legacy pid-only lock naming an exited process is taken over', () => {
+  save([])
+  mkdirSync(join(repository, '.git/simmer-tmp'))
+  const lock = join(repository, '.git/simmer-tmp/epic.lock')
+  const exited = Bun.spawnSync([process.execPath, '-e', '1'])
+  writeFileSync(lock, `${exited.pid}`)
+  const result = run()
+  expect(result.exitCode).toBe(0)
+  expect(result.stderr).toBe('')
+  expect(existsSync(lock)).toBe(false)
+})
+
+test.skipIf(process.platform !== 'linux')(
+  'a reclaim lock naming a live pid with the wrong start time does not block takeover',
+  () => {
+    save([])
+    mkdirSync(join(repository, '.git/simmer-tmp'))
+    const lock = join(repository, '.git/simmer-tmp/epic.lock')
+    writeFileSync(lock, '')
+    writeFileSync(
+      `${lock}.reclaim-${statSync(lock).ino}`,
+      `${process.pid} ${BigInt(procStartTime(process.pid)) + 1n}`
+    )
+    const result = run()
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(existsSync(lock)).toBe(false)
+  }
+)
+
+test.skipIf(process.platform !== 'linux')(
+  'a reclaim lock naming a live pid with the correct start time blocks takeover',
+  () => {
+    save([])
+    mkdirSync(join(repository, '.git/simmer-tmp'))
+    const lock = join(repository, '.git/simmer-tmp/epic.lock')
+    writeFileSync(lock, '')
+    writeFileSync(
+      `${lock}.reclaim-${statSync(lock).ino}`,
+      `${process.pid} ${procStartTime(process.pid)}`
+    )
+    const result = run()
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: `simmer run epic is already running (pid ${process.pid})\n`
+    })
+    expect(existsSync(lock)).toBe(true)
+    expect(readFileSync(lock, 'utf8')).toBe('')
+  }
+)
 
 test('run recovers an unassigned in-progress child without a lease', () => {
   save([{ ...child(1), status: 'in_progress' }])
