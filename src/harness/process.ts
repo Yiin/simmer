@@ -1,0 +1,245 @@
+import { execFile, spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { readdir, readFile } from 'node:fs/promises'
+import { promisify } from 'node:util'
+import type { Config } from '../config'
+
+export type Usage = {
+  inputTokens: number
+  outputTokens: number
+}
+export type HarnessResult = {
+  exitCode: number
+  finalMessage: string
+  usage: Usage | undefined
+  killedByWatchdog: boolean
+}
+export type RunOptions = {
+  prompt: string
+  cwd: string
+  models: Config['models']
+  binary: string
+  watchdogMinutes: number
+  watchdogIntervalMs?: number
+}
+export type StreamEvent = {
+  finalMessage?: string
+  usage?: Usage
+  usageKey?: string
+}
+
+const executeFile = promisify(execFile)
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function record(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {}
+}
+
+export function usage(inputTokens: unknown, outputTokens: unknown): Usage | undefined {
+  if (
+    typeof inputTokens === 'number' &&
+    typeof outputTokens === 'number' &&
+    Number.isFinite(inputTokens) &&
+    Number.isFinite(outputTokens) &&
+    inputTokens >= 0 &&
+    outputTokens >= 0
+  ) {
+    return { inputTokens, outputTokens }
+  }
+  return undefined
+}
+
+export function messageText(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined
+  const text = content.flatMap((block: unknown) => {
+    const value = record(block)
+    return value.type === 'text' && typeof value.text === 'string' ? [value.text] : []
+  })
+  return text.length ? text.join('') : undefined
+}
+
+export function agents(models: Config['models']) {
+  return {
+    planner: {
+      description: 'Plans the child task',
+      prompt: 'Plan the child task using its spec and the project design.',
+      model: models.planner
+    },
+    implementer: {
+      description: 'Implements the child task',
+      prompt: 'Implement the approved plan and follow the project rules.',
+      model: models.implementer
+    },
+    reviewer: {
+      description: 'Reviews the plan and code',
+      prompt: 'Review the plan and code against the spec. Report errors and risks.',
+      model: models.reviewer
+    },
+    tester: {
+      description: 'Checks the child task',
+      prompt: 'Check the acceptance criteria and run the project gate.',
+      model: models.tester
+    }
+  }
+}
+
+export function rolePrompt(prompt: string, models: Config['models']): string {
+  const roles = Object.entries(agents(models)).map(
+    ([role, agent]) => `${role} (model: ${agent.model}): ${agent.prompt}`
+  )
+  return `${prompt}\n\nCook-it stage roles:\n${roles.join('\n')}`
+}
+
+async function head(cwd: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await executeFile('git', ['rev-parse', '--verify', 'HEAD'], {
+      cwd,
+      timeout: 5000
+    })
+    return stdout.trim()
+  } catch {
+    return undefined
+  }
+}
+
+async function killTree(processId: number, workerId: string): Promise<void> {
+  const descendants = new Set([processId])
+  const entries = await readdir('/proc').catch(() => [])
+  const processes = await Promise.all(
+    entries
+      .filter((entry) => /^\d+$/.test(entry))
+      .map(async (entry) => {
+        const childId = Number(entry)
+        try {
+          const status = await readFile(`/proc/${entry}/stat`, 'utf8')
+          const parentId = Number(status.slice(status.lastIndexOf(')') + 2).split(' ')[1])
+          try {
+            const environment = await readFile(`/proc/${entry}/environ`, 'utf8')
+            if (environment.split('\0').includes(`SIMMER_HARNESS_ID=${workerId}`)) {
+              descendants.add(childId)
+            }
+          } catch {}
+          return { childId, parentId }
+        } catch {}
+      })
+  )
+  for (const parentId of descendants) {
+    for (const child of processes) {
+      if (child?.parentId === parentId) descendants.add(child.childId)
+    }
+  }
+  for (const childId of [...descendants].reverse()) {
+    for (const targetId of [-childId, childId]) {
+      try {
+        process.kill(targetId, 'SIGKILL')
+      } catch (error) {
+        if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
+      }
+    }
+  }
+}
+
+export async function runProcess(
+  command: string[],
+  options: RunOptions,
+  parse: (event: Record<string, unknown>) => StreamEvent
+): Promise<HarnessResult> {
+  let previousHead = await head(options.cwd)
+  let lastActivity = performance.now()
+  let checking = false
+  let closed = false
+  let finalMessage = ''
+  let killedByWatchdog = false
+  let pending = ''
+  let eventNumber = 0
+  const workerId = randomUUID()
+  const tokenUsage = new Map<string, Usage>()
+  const worker = spawn(command[0] ?? '', command.slice(1), {
+    cwd: options.cwd,
+    detached: true,
+    env: { ...process.env, SIMMER_HARNESS_ID: workerId },
+    stdio: ['ignore', 'pipe', 'ignore']
+  })
+  const watchdogMilliseconds = options.watchdogMinutes * 60000
+
+  function consume(line: string) {
+    let value: unknown
+    try {
+      value = JSON.parse(line)
+    } catch {
+      return
+    }
+    const event = parse(record(value))
+    if (event.finalMessage !== undefined) finalMessage = event.finalMessage
+    if (event.usage) {
+      if (event.usageKey === 'total') tokenUsage.clear()
+      tokenUsage.set(event.usageKey ?? String(eventNumber++), event.usage)
+    }
+  }
+
+  worker.stdout.setEncoding('utf8')
+  worker.stdout.on('data', (chunk: string) => {
+    lastActivity = performance.now()
+    pending += chunk
+    let newline = pending.indexOf('\n')
+    while (newline !== -1) {
+      consume(pending.slice(0, newline))
+      pending = pending.slice(newline + 1)
+      newline = pending.indexOf('\n')
+    }
+  })
+
+  const timer = setInterval(async () => {
+    if (checking || closed || killedByWatchdog) return
+    checking = true
+    try {
+      const currentHead = await head(options.cwd)
+      if (closed) return
+      if (currentHead !== undefined && currentHead !== previousHead) {
+        previousHead = currentHead
+        lastActivity = performance.now()
+      } else if (performance.now() - lastActivity >= watchdogMilliseconds && worker.pid) {
+        try {
+          await killTree(worker.pid, workerId)
+          killedByWatchdog = true
+          worker.stdout.destroy()
+        } catch (error) {
+          if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) {
+            worker.emit('error', error)
+          }
+        }
+      }
+    } finally {
+      checking = false
+    }
+  }, options.watchdogIntervalMs ?? Math.min(1000, watchdogMilliseconds))
+
+  try {
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      worker.once('error', reject)
+      worker.once('close', (code, signal) => resolve(code ?? (signal === 'SIGKILL' ? 137 : 1)))
+    })
+    consume(pending)
+    const totals = [...tokenUsage.values()]
+    return {
+      exitCode,
+      finalMessage,
+      usage: totals.length
+        ? totals.reduce(
+            (total, value) => ({
+              inputTokens: total.inputTokens + value.inputTokens,
+              outputTokens: total.outputTokens + value.outputTokens
+            }),
+            { inputTokens: 0, outputTokens: 0 }
+          )
+        : undefined,
+      killedByWatchdog
+    }
+  } finally {
+    closed = true
+    clearInterval(timer)
+  }
+}
