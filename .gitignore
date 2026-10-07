@@ -6,3 +6,6 @@
 .beads/proxieddb/
 *.gate.lock*
 node_modules/
+
+# Holds the shared Dolt server address; connect a new clone with /sync-bd.
+.beads/
