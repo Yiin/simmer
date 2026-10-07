@@ -173,7 +173,7 @@ export async function runChild(options: {
       const report = {
         ...(options.recordRecovery ? { branch } : {}),
         harness: config.harness,
-        models: config.models,
+        models: config.models[config.harness],
         attempt,
         durationMs: Date.now() - start,
         usage: worker.usage ?? null,

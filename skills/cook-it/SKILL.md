@@ -9,9 +9,11 @@ argument-hint: <issue id, epic id, or short task description>
 
 End-to-end execution of a well-scoped engineering task. You own the **result**, not a checklist. The fixed spine is plan → implement → verify → gate → commit; the variable part is how much independent scrutiny each stage gets, and you decide that from the task itself. A one-line fix and a multi-subsystem feature deserve different amounts of review — spending three agents on the former is waste, spending one on the latter is negligence. **The justification burden runs both ways**: name the criterion that let you scale a step down, and name the one that made you escalate past the baseline. Unjustified ceremony is as much a defect as unjustified confidence, and most tasks that reach this skill are small — the cheap path is the default, not the exception.
 
-**Model tiers.** When simmer starts a Claude Code worker, it injects stage agents through `--agents`: `planner`, `implementer`, `reviewer`, and `tester`. When the Agent tool lists them, dispatch those agents by name and pass no model. The definition already carries the model, and an injected agent replaces the `general-purpose` default wherever this skill names one. Work you do in your own session stays on the session model. A model the user named pins every stage instead. Without injected agents (a plain `claude` run, or another harness), use the defaults: `opus` for plan composition and plan critique, `sonnet` for implementers, and `opus` for reviewers, testers, and cleanup agents. A reviewer must be at least as strong as the model that wrote the code it reviews.
+**Model tiers.** Supplied cook-it stage roles take precedence over this skill's defaults. When simmer starts a Claude Code worker, it injects `planner`, `implementer`, `reviewer`, and `tester` through `--agents`. Dispatch an injected agent by name and pass no model override. Its definition already carries the model. An injected agent replaces the `general-purpose` default wherever this skill names one.
 
-Never drop the review stage over a model limit, and never downgrade it to the session thread. Report which model the review ran on.
+Work in your own session stays on the session model. A model the user named pins every stage when the current harness can run it. Without supplied stage roles, a plain Claude run uses `opus` for planner, reviewer, tester, and cleanup, and `sonnet` for implementer. Other harnesses use their current session defaults. When a supplied role omits a model name, use the current harness or session default. This rule covers tester and cleanup dispatches too. Never call another harness just to satisfy a model hint that the current harness cannot run.
+
+Keep independent review when a requested model is unavailable. Use a supported model and state the limit. A reviewer must be at least as strong as the model that wrote the code it reviews. Use the same model when the harness provides no verified stronger choice. Report the review model only when session metadata or tool output verifies it. Otherwise report that the model is unknown. Never claim a model name from the requested role alone.
 
 **Harness fallback (applies to every dispatch below).** When the harness provides subagents, use them. Otherwise invoke a fresh one-shot process of the same headless harness with a self-contained brief in a temporary file (following `ralph/run.sh`'s invocation pattern) — except for repository writes, which stay in the main thread. If the same harness cannot be invoked headlessly at all, do the step in the main thread and say plainly that independent review was unavailable.
 
@@ -163,7 +165,7 @@ If BLOCK, describe exactly what to fix and send that brief back to the implement
 
 QA sits here for two reasons. The implementer already ran focused checks, so the app is runnable. And any cleanup fix lands before the gate, so the gate runs once, on the final state.
 
-Dispatch the injected `tester` agent by name. If the session has no injected agents, take the harness fallback above: a fresh agent on `opus`, briefed with the same content.
+Dispatch the injected `tester` agent by name. Without injected agents, use the harness fallback and stage model rules above. Give the fresh agent the same brief.
 
 The tester brief carries:
 
@@ -173,7 +175,7 @@ The tester brief carries:
 
 The tester reports **PASS** or **FAIL**, with the steps it drove and the evidence it saw. On FAIL it gives an exact reproduction. The tester never edits files. It stops dev servers, watchers, and any other long-running process before it ends.
 
-**The cleanup loop.** On FAIL, dispatch a `cleanup` agent (the injected one when the session has it, otherwise a fresh agent on `opus`) with the tester's report and the plan's non-goals. Cleanup reproduces the failure first, makes the minimal fix, and runs focused checks. It never commits, and it never re-runs QA on its own work. Then a **fresh** tester re-QAs the failed flow. Cap at two cleanup rounds.
+**The cleanup loop.** On FAIL, dispatch a `cleanup` agent (the injected one when the session has it, otherwise a fresh agent using the stage model rules above) with the tester's report and the plan's non-goals. Cleanup reproduces the failure first, makes the minimal fix, and runs focused checks. It never commits, and it never re-runs QA on its own work. Then a **fresh** tester re-QAs the failed flow. Cap at two cleanup rounds.
 
 This loop is serial after step 4's BLOCK loop and independent of it. **A QA FAIL never reopens review.** The cleanup delta gets step 4's self-review checklist, the re-QA, and the gate. It does not get a fresh reviewer round.
 

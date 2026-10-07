@@ -27,7 +27,7 @@ Common flags: `--harness claude|codex|pi`, `--json` (one JSON event per line on 
 
 1. **Claim.** Take a bd claim lease on the child with a compare-and-set guard (`--if-status open`). A heartbeat renews the lease while the worker runs. A lease from a dead run expires and the next run reclaims it.
 2. **Worktree.** Create a worktree at the run branch tip (`simmer/<epic>`), or use the one the orchestrator passed. The primary checkout is never touched, so its uncommitted files do not matter.
-3. **Work.** Start the harness headless in the worktree with the `cook-it` prompt for this child. Stage subagents get their models from the config.
+3. **Work.** Start the harness headless in the worktree with the `cook-it` prompt for this child. Stage roles use the selected harness's model config.
 4. **Check effects.** Ignore what the worker says it did. Look for new commits on the worktree branch and a closed bead.
 5. **Gate.** Run the project's gate command in the worktree.
 6. **Retry once.** A red gate or a missing commit gets one fresh worker with the failure output in its brief. A second failure marks the child blocked with a bd note, and the run moves on to the next ready child.
@@ -66,15 +66,21 @@ Nothing is kept in memory across commands. `simmer run <epic>` after a crash fin
   "harness": "claude",
   "watchdogMinutes": 20,
   "models": {
-    "planner": "opus",
-    "implementer": "sonnet",
-    "reviewer": "opus",
-    "tester": "opus"
+    "claude": {
+      "planner": "opus",
+      "implementer": "sonnet",
+      "reviewer": "opus",
+      "tester": "opus"
+    },
+    "codex": {},
+    "pi": {}
   }
 }
 ```
 
-`models` maps cook-it stage roles to models. simmer turns it into each harness's subagent definitions: `--agents` JSON for Claude Code, and pi-subagents config for Pi.
+`models` maps each harness to its cook-it stage models. Claude defaults to `opus` for planner, reviewer, and tester, and `sonnet` for implementer. Codex and Pi default to empty maps, so their stage prompts omit model names and use the current harness defaults. Partial maps inherit defaults only for their own harness. A `--harness` override selects that harness's map.
+
+Claude receives role definitions through `--agents` JSON. Codex and Pi receive stage instructions in their prompts, with model names only for configured roles. simmer does not generate Pi subagent config. Configure model IDs that the selected harness can run. simmer validates the config shape and non-empty model names. It does not check provider availability. Flat role maps are invalid.
 
 ## Harnesses
 
@@ -82,7 +88,7 @@ Nothing is kept in memory across commands. `simmer run <epic>` after a crash fin
 |---|---|
 | Claude Code | `claude -p --output-format stream-json --agents <json>` |
 | Codex | `codex exec --json -s danger-full-access` (the workspace-write sandbox cannot write a worktree's git dir) |
-| Pi | `pi -p --mode json` with pi-subagents |
+| Pi | `pi -p --mode json` with stage instructions in the prompt |
 
 Each adapter returns the exit status, the final message, and token usage.
 

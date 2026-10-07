@@ -8,12 +8,6 @@ import { runHarness } from '../src/harness'
 let directory: string
 let originalPath: string | undefined
 const harnesses: Harness[] = ['claude', 'codex', 'pi']
-const models = {
-  planner: 'plan-model',
-  implementer: 'code-model',
-  reviewer: 'review-model',
-  tester: 'test-model'
-}
 
 beforeEach(() => {
   directory = mkdtempSync('/tmp/simmer-harness-')
@@ -52,7 +46,6 @@ async function run(harness: Harness, watchdogMinutes = 1, binary: string = harne
     config: {
       ...config,
       harness,
-      models,
       watchdogMinutes,
       harnessPaths: { ...config.harnessPaths, [harness]: binary }
     },
@@ -92,6 +85,19 @@ function repository() {
 }
 
 test('Claude uses unattended flags, role agents, cwd, and empty stdin', async () => {
+  writeFileSync(
+    join(directory, 'simmer.json'),
+    JSON.stringify({
+      models: {
+        claude: {
+          planner: 'plan-model',
+          implementer: 'code-model',
+          reviewer: 'review-model',
+          tester: 'test-model'
+        }
+      }
+    })
+  )
   fake(
     'claude',
     events([
@@ -175,10 +181,10 @@ const roleText = `Do the task. Keep "quotes" and $variables literal.
 Second line.
 
 Cook-it stage roles:
-planner (model: plan-model): Plan the child task using its spec and the project design.
-implementer (model: code-model): Implement the approved plan and follow the project rules.
-reviewer (model: review-model): Review the plan and code against the spec. Report errors and risks.
-tester (model: test-model): Check the acceptance criteria and run the project gate.`
+planner: Plan the child task using its spec and the project design.
+implementer: Implement the approved plan and follow the project rules.
+reviewer: Review the plan and code against the spec. Report errors and risks.
+tester: Check the acceptance criteria and run the project gate.`
 
 test('Codex parses completed items and usage with workspace and network flags', async () => {
   fake(
@@ -253,6 +259,107 @@ test('Pi uses its configured binary and totals completed assistant usage only', 
     cwd: directory,
     stdin: ''
   })
+})
+
+test.each(['codex', 'pi'] satisfies Harness[])(
+  '%s defaults leave every role unnamed',
+  async (harness) => {
+    fake(harness, '')
+    await run(harness)
+    const prompt = invocation().arguments.at(-1) ?? ''
+    expect(prompt).toBe(roleText)
+    expect(prompt).not.toContain('(model:')
+    expect(prompt).not.toContain('opus')
+    expect(prompt).not.toContain('sonnet')
+  }
+)
+
+test.each(['codex', 'pi'] satisfies Harness[])(
+  '%s selects its own configured roles after a harness override',
+  async (harness) => {
+    writeFileSync(
+      join(directory, 'simmer.json'),
+      JSON.stringify({
+        harness: 'claude',
+        models: {
+          claude: { reviewer: 'claude-review' },
+          codex: { planner: 'gpt-plan', reviewer: 'gpt-review' },
+          pi: { planner: 'pi-plan', reviewer: 'pi-review' }
+        }
+      })
+    )
+    fake(harness, '')
+    await run(harness)
+    const prefix = harness === 'codex' ? 'gpt' : 'pi'
+    expect(invocation().arguments.at(-1)).toBe(
+      roleText
+        .replace('planner:', `planner (model: ${prefix}-plan):`)
+        .replace('reviewer:', `reviewer (model: ${prefix}-review):`)
+    )
+  }
+)
+
+test.each(['codex', 'pi'] satisfies Harness[])(
+  '%s includes every explicitly configured role model',
+  async (harness) => {
+    writeFileSync(
+      join(directory, 'simmer.json'),
+      JSON.stringify({
+        models: {
+          [harness]: {
+            planner: `${harness}-plan`,
+            implementer: `${harness}-code`,
+            reviewer: `${harness}-review`,
+            tester: `${harness}-test`
+          }
+        }
+      })
+    )
+    fake(harness, '')
+    await run(harness)
+    expect(invocation().arguments.at(-1)).toBe(
+      roleText
+        .replace('planner:', `planner (model: ${harness}-plan):`)
+        .replace('implementer:', `implementer (model: ${harness}-code):`)
+        .replace('reviewer:', `reviewer (model: ${harness}-review):`)
+        .replace('tester:', `tester (model: ${harness}-test):`)
+    )
+  }
+)
+
+test('Claude combines a custom role model with its own defaults', async () => {
+  writeFileSync(
+    join(directory, 'simmer.json'),
+    JSON.stringify({
+      models: {
+        claude: { reviewer: 'custom-review' },
+        codex: { reviewer: 'gpt-review' }
+      }
+    })
+  )
+  fake('claude', '')
+  await run('claude')
+  const agents = JSON.parse(invocation().arguments.at(-1) ?? '')
+  expect(agents.planner.model).toBe('opus')
+  expect(agents.implementer.model).toBe('sonnet')
+  expect(agents.reviewer.model).toBe('custom-review')
+  expect(agents.tester.model).toBe('opus')
+})
+
+test('Claude keeps its default roles when only Codex and Pi roles are configured', async () => {
+  writeFileSync(
+    join(directory, 'simmer.json'),
+    JSON.stringify({
+      models: { codex: { reviewer: 'gpt-review' }, pi: { reviewer: 'pi-review' } }
+    })
+  )
+  fake('claude', '')
+  await run('claude')
+  const agents = JSON.parse(invocation().arguments.at(-1) ?? '')
+  expect(agents.planner.model).toBe('opus')
+  expect(agents.implementer.model).toBe('sonnet')
+  expect(agents.reviewer.model).toBe('opus')
+  expect(agents.tester.model).toBe('opus')
 })
 
 test.each(harnesses)('%s returns a nonzero exit without inventing usage', async (harness) => {

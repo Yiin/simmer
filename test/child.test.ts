@@ -291,7 +291,7 @@ test('lands the first attempt and records facts on the child and its actual pare
   if (typeof report !== 'string') throw new Error('Missing attempt note')
   expect(JSON.parse(report)).toEqual({
     harness: 'codex',
-    models: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' },
+    models: {},
     attempt: 1,
     durationMs: expect.any(Number),
     usage: { inputTokens: 2, outputTokens: 3, cacheReadTokens: 5, cacheWriteTokens: 0 },

@@ -15,7 +15,7 @@ export function runHarness(
   return { claude, codex, pi }[config.harness]({
     prompt: options.prompt,
     cwd: options.cwd,
-    models: config.models,
+    models: config.models[config.harness],
     binary: config.harnessPaths[config.harness],
     watchdogMinutes: config.watchdogMinutes,
     env: options.env,

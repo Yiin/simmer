@@ -2,5 +2,15 @@
   "base": "main",
   "gate": "bun install --frozen-lockfile && bun run gate",
   "push": true,
-  "harness": "claude"
+  "harness": "claude",
+  "models": {
+    "claude": {
+      "planner": "opus",
+      "implementer": "sonnet",
+      "reviewer": "opus",
+      "tester": "opus"
+    },
+    "codex": {},
+    "pi": {}
+  }
 }

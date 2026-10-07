@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 export type Harness = 'claude' | 'codex' | 'pi'
 export type ModelRole = 'planner' | 'implementer' | 'reviewer' | 'tester'
+export type RoleModels = Partial<Record<ModelRole, string>>
 
 export type Config = {
   base: string
@@ -11,7 +12,7 @@ export type Config = {
   harness: Harness
   harnessPaths: Record<Harness, string>
   watchdogMinutes: number
-  models: Record<ModelRole, string>
+  models: Record<Harness, RoleModels>
 }
 
 function invalid(field: string, requirement: string): never {
@@ -40,6 +41,19 @@ function knownFields(value: Record<string, unknown>, fields: string[], prefix = 
   for (const field of Object.keys(value)) {
     if (!fields.includes(field)) invalid(`${prefix}${field}`, 'is unknown')
   }
+}
+
+function roleModels(value: unknown, harness: Harness, defaults: RoleModels): RoleModels {
+  const fields = value === undefined ? {} : object(value, `models.${harness}`)
+  const roles: ModelRole[] = ['planner', 'implementer', 'reviewer', 'tester']
+  knownFields(fields, roles, `models.${harness}.`)
+  const models = { ...defaults }
+  for (const role of roles) {
+    if (fields[role] !== undefined) {
+      models[role] = text(fields[role], `models.${harness}.${role}`)
+    }
+  }
+  return models
 }
 
 export async function loadConfig(projectRoot = process.cwd()): Promise<Config> {
@@ -90,7 +104,7 @@ export async function loadConfig(projectRoot = process.cwd()): Promise<Config> {
     config.harnessPaths === undefined ? {} : object(config.harnessPaths, 'harnessPaths')
   knownFields(harnessPaths, ['claude', 'codex', 'pi'], 'harnessPaths.')
   const models = config.models === undefined ? {} : object(config.models, 'models')
-  knownFields(models, ['planner', 'implementer', 'reviewer', 'tester'], 'models.')
+  knownFields(models, ['claude', 'codex', 'pi'], 'models.')
 
   return {
     base: text(config.base === undefined ? 'main' : config.base, 'base'),
@@ -113,13 +127,14 @@ export async function loadConfig(projectRoot = process.cwd()): Promise<Config> {
     },
     watchdogMinutes,
     models: {
-      planner: text(models.planner === undefined ? 'opus' : models.planner, 'models.planner'),
-      implementer: text(
-        models.implementer === undefined ? 'sonnet' : models.implementer,
-        'models.implementer'
-      ),
-      reviewer: text(models.reviewer === undefined ? 'opus' : models.reviewer, 'models.reviewer'),
-      tester: text(models.tester === undefined ? 'opus' : models.tester, 'models.tester')
+      claude: roleModels(models.claude, 'claude', {
+        planner: 'opus',
+        implementer: 'sonnet',
+        reviewer: 'opus',
+        tester: 'opus'
+      }),
+      codex: roleModels(models.codex, 'codex', {}),
+      pi: roleModels(models.pi, 'pi', {})
     }
   }
 }

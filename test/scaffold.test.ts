@@ -88,7 +88,11 @@ test('missing config uses the design defaults', async () => {
     harness: 'claude',
     harnessPaths: { claude: 'claude', codex: 'codex', pi: 'pi' },
     watchdogMinutes: 20,
-    models: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' }
+    models: {
+      claude: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' },
+      codex: {},
+      pi: {}
+    }
   })
 })
 
@@ -100,7 +104,16 @@ test('config loads every supported field', async () => {
     harness: 'pi',
     harnessPaths: { claude: '/bin/claude', codex: '/bin/codex', pi: '/bin/pi' },
     watchdogMinutes: 0.5,
-    models: { planner: 'plan', implementer: 'code', reviewer: 'review', tester: 'test' }
+    models: {
+      claude: { planner: 'plan', implementer: 'code', reviewer: 'review', tester: 'test' },
+      codex: {
+        planner: 'gpt-plan',
+        implementer: 'gpt-code',
+        reviewer: 'gpt-review',
+        tester: 'gpt-test'
+      },
+      pi: { planner: 'pi-plan', implementer: 'pi-code', reviewer: 'pi-review', tester: 'pi-test' }
+    }
   })
   expect(await loadConfig(directory)).toEqual({
     base: 'develop',
@@ -109,20 +122,54 @@ test('config loads every supported field', async () => {
     harness: 'pi',
     harnessPaths: { claude: '/bin/claude', codex: '/bin/codex', pi: '/bin/pi' },
     watchdogMinutes: 0.5,
-    models: { planner: 'plan', implementer: 'code', reviewer: 'review', tester: 'test' }
+    models: {
+      claude: { planner: 'plan', implementer: 'code', reviewer: 'review', tester: 'test' },
+      codex: {
+        planner: 'gpt-plan',
+        implementer: 'gpt-code',
+        reviewer: 'gpt-review',
+        tester: 'gpt-test'
+      },
+      pi: { planner: 'pi-plan', implementer: 'pi-code', reviewer: 'pi-review', tester: 'pi-test' }
+    }
   })
 })
 
-test('partial nested config keeps unspecified defaults', async () => {
-  writeConfig({ harnessPaths: { pi: '/opt/pi' }, models: { implementer: 'custom' } })
+test('partial nested config keeps only each harness defaults', async () => {
+  writeConfig({
+    harnessPaths: { pi: '/opt/pi' },
+    models: {
+      claude: { implementer: 'custom' },
+      codex: { reviewer: 'gpt-review' },
+      pi: { planner: 'pi-plan' }
+    }
+  })
   const config = await loadConfig(directory)
   expect(config.harnessPaths).toEqual({ claude: 'claude', codex: 'codex', pi: '/opt/pi' })
   expect(config.models).toEqual({
-    planner: 'opus',
-    implementer: 'custom',
-    reviewer: 'opus',
-    tester: 'opus'
+    claude: { planner: 'opus', implementer: 'custom', reviewer: 'opus', tester: 'opus' },
+    codex: { reviewer: 'gpt-review' },
+    pi: { planner: 'pi-plan' }
   })
+})
+
+test('empty harness maps preserve their own defaults', async () => {
+  writeConfig({ models: { claude: {}, codex: {}, pi: {} } })
+  expect((await loadConfig(directory)).models).toEqual({
+    claude: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' },
+    codex: {},
+    pi: {}
+  })
+})
+
+test('changing the selected harness does not copy another harness models', async () => {
+  writeConfig({ harness: 'claude', models: { claude: { reviewer: 'custom' } } })
+  const config = await loadConfig(directory)
+  config.harness = 'codex'
+  expect(config.models[config.harness]).toEqual({})
+  config.harness = 'pi'
+  expect(config.models[config.harness]).toEqual({})
+  expect(config.models.claude.reviewer).toBe('custom')
 })
 
 test.each([
@@ -151,16 +198,8 @@ test.each([
     message: 'watchdogMinutes must be a positive finite number'
   },
   { config: { models: null }, message: 'models must be an object' },
-  { config: { models: { planner: 1 } }, message: 'models.planner must be a non-empty string' },
-  {
-    config: { models: { implementer: '' } },
-    message: 'models.implementer must be a non-empty string'
-  },
-  {
-    config: { models: { reviewer: false } },
-    message: 'models.reviewer must be a non-empty string'
-  },
-  { config: { models: { tester: null } }, message: 'models.tester must be a non-empty string' },
+  { config: { models: [] }, message: 'models must be an object' },
+  { config: { models: { planner: 'opus' } }, message: 'models.planner is unknown' },
   { config: { watchdogMinute: 20 }, message: 'watchdogMinute is unknown' },
   { config: { harnessPaths: { typo: 'pi' } }, message: 'harnessPaths.typo is unknown' },
   { config: { models: { typo: 'opus' } }, message: 'models.typo is unknown' },
@@ -173,6 +212,23 @@ test.each([
     stdout: '',
     stderr: `Invalid simmer.json: ${message}\n`
   })
+})
+
+test.each(['claude', 'codex', 'pi'])('%s validates its role map', async (harness) => {
+  for (const value of [null, [], 'opus', 1, false]) {
+    writeConfig({ models: { [harness]: value } })
+    await expect(loadConfig(directory)).rejects.toThrow(`models.${harness} must be an object`)
+  }
+  writeConfig({ models: { [harness]: { typo: 'model' } } })
+  await expect(loadConfig(directory)).rejects.toThrow(`models.${harness}.typo is unknown`)
+  for (const role of ['planner', 'implementer', 'reviewer', 'tester']) {
+    for (const value of [null, [], {}, 1, false, '', ' ']) {
+      writeConfig({ models: { [harness]: { [role]: value } } })
+      await expect(loadConfig(directory)).rejects.toThrow(
+        `models.${harness}.${role} must be a non-empty string`
+      )
+    }
+  }
 })
 
 test('malformed JSON reports the config file', () => {

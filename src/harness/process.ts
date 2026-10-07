@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
-import type { Config } from '../config'
+import type { RoleModels } from '../config'
 
 // inputTokens counts only uncached input. Cache fields are 0 when a stream does not report them.
 export type Usage = {
@@ -20,7 +20,7 @@ export type HarnessResult = {
 export type RunOptions = {
   prompt: string
   cwd: string
-  models: Config['models']
+  models: RoleModels
   binary: string
   watchdogMinutes: number
   watchdogIntervalMs?: number
@@ -82,7 +82,7 @@ export function messageText(content: unknown): string | undefined {
   return text.length ? text.join('') : undefined
 }
 
-export function agents(models: Config['models']) {
+export function agents(models: RoleModels) {
   return {
     planner: {
       description: 'Plans the child task',
@@ -107,10 +107,11 @@ export function agents(models: Config['models']) {
   }
 }
 
-export function rolePrompt(prompt: string, models: Config['models']): string {
-  const roles = Object.entries(agents(models)).map(
-    ([role, agent]) => `${role} (model: ${agent.model}): ${agent.prompt}`
-  )
+export function rolePrompt(prompt: string, models: RoleModels): string {
+  const roles = Object.entries(agents(models)).map(([role, agent]) => {
+    const model = agent.model === undefined ? '' : ` (model: ${agent.model})`
+    return `${role}${model}: ${agent.prompt}`
+  })
   return `${prompt}\n\nCook-it stage roles:\n${roles.join('\n')}`
 }
 
