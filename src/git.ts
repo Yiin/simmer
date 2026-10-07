@@ -378,8 +378,7 @@ export class Git {
         const result = await this.rebase(worktree.path, `refs/heads/${worktree.runBranch}`)
         if (result.kind !== 'landed') throw new Error('Child cleanup rebase failed')
       }
-      await this.removeWorktree(worktree)
-      if (worktree.owned) await this.run(['branch', '-d', '--', worktree.branch])
+      await this.cleanupWorktree(worktree)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       cleanupError = [cleanupError, message].filter(Boolean).join('\n')
@@ -389,5 +388,11 @@ export class Git {
 
   async removeWorktree(worktree: Worktree): Promise<void> {
     if (worktree.owned) await this.run(['worktree', 'remove', '--', worktree.path])
+  }
+
+  async cleanupWorktree(worktree: Worktree): Promise<void> {
+    if (!worktree.owned) return
+    await this.removeWorktree(worktree)
+    await this.run(['branch', '-d', '--', worktree.branch])
   }
 }

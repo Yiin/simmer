@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path'
 import { runChild } from '../src/child'
 import { loadConfig } from '../src/config'
+import { Git } from '../src/git'
 
 const cliPath = join(import.meta.dir, '../src/cli.ts')
 let directory: string
@@ -384,6 +385,129 @@ test('adopts the supplied worktree and skips landing', () => {
   expect(git(['log', '-1', '--format=%s'])).toBe('initial')
   expect(git(['log', '-1', '--format=%s'], path)).toBe('worker 1')
   expect(calls('note')).toHaveLength(1)
+})
+
+test.each(['research-note', 'research-comment'])(
+  '--no-land removes the created worktree and branch for %s without commits',
+  (mode) => {
+    scenario = mode
+    const mainTip = git(['rev-parse', 'main'])
+    git(['branch', 'simmer/parent-9'])
+    const runTip = git(['rev-parse', 'simmer/parent-9'])
+    const result = run('--no-land')
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(state().status).toBe('closed')
+    expect(result.events.at(-1)).toEqual({
+      event: 'done',
+      id: 'task-1.1',
+      outcome: 'skipped'
+    })
+    const path = result.events.find((event) => event.event === 'attempt-started')?.worktree
+    if (typeof path !== 'string') throw new Error('Missing worktree')
+    expect(existsSync(path)).toBe(false)
+    expect(git(['worktree', 'list', '--porcelain'])).not.toContain(path)
+    expect(git(['branch', '--list', 'simmer/parent-9-child-*'])).toBe('')
+    expect(git(['rev-parse', 'main'])).toBe(mainTip)
+    expect(git(['rev-parse', 'simmer/parent-9'])).toBe(runTip)
+  }
+)
+
+test.each(['success', 'stale-commit'])(
+  '--no-land keeps the created worktree and branch with commits for %s',
+  (mode) => {
+    scenario = mode
+    const mainTip = git(['rev-parse', 'main'])
+    const result = run('--no-land')
+    expect(result.exitCode).toBe(0)
+    expect(state().status).toBe('closed')
+    const path = result.events.find((event) => event.event === 'attempt-started')?.worktree
+    if (typeof path !== 'string') throw new Error('Missing worktree')
+    expect(existsSync(path)).toBe(true)
+    const branch = git(['branch', '--show-current'], path)
+    expect(branch).toStartWith('simmer/parent-9-child-')
+    expect(git(['rev-parse', `refs/heads/${branch}`])).toBe(git(['rev-parse', 'HEAD'], path))
+    expect(git(['rev-list', '--count', 'main..HEAD'], path)).toBe('1')
+    expect(git(['rev-parse', 'main'])).toBe(mainTip)
+    expect(git(['rev-parse', 'simmer/parent-9'])).toBe(mainTip)
+    expect(result.events.at(-1)?.outcome).toBe('skipped')
+    expect(
+      result.events
+        .filter((event) => event.event === 'attempt-finished')
+        .map((event) => event.commitCount)
+    ).toEqual(mode === 'stale-commit' ? [1, 0] : [1])
+  }
+)
+
+test.each(['research-note', 'research-comment'])(
+  '--no-land keeps the supplied worktree and branch for %s without commits',
+  (mode) => {
+    scenario = mode
+    const path = join(directory, 'assigned')
+    git(['worktree', 'add', '-qb', 'assigned', path])
+    const tip = git(['rev-parse', 'assigned'])
+    const result = run('--worktree', path, '--no-land')
+    expect(result.exitCode).toBe(0)
+    expect(state().status).toBe('closed')
+    expect(existsSync(path)).toBe(true)
+    expect(git(['branch', '--show-current'], path)).toBe('assigned')
+    expect(git(['rev-parse', 'assigned'])).toBe(tip)
+    expect(git(['worktree', 'list', '--porcelain'])).toContain(path)
+    expect(result.events.at(-1)?.outcome).toBe('skipped')
+  }
+)
+
+test('--no-land cleanup failure keeps the successful bead closed and reports the error', async () => {
+  scenario = 'research-note'
+  writeFileSync(join(directory, 'scenario'), scenario)
+  const config = await loadConfig(repository)
+  const originalEnvironment = { PATH: process.env.PATH, BEADS_ACTOR: process.env.BEADS_ACTOR }
+  process.env.PATH = environment.PATH
+  process.env.BEADS_ACTOR = environment.BEADS_ACTOR
+  const output: string[] = []
+  const stdoutSpy = spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    output.push(String(chunk))
+    return true
+  })
+  const cleanupSpy = spyOn(Git.prototype, 'removeWorktree').mockRejectedValue(
+    new Error('Cleanup failed')
+  )
+  try {
+    expect(
+      await runChild({ id: 'task-1.1', cwd: repository, config, json: true, noLand: true })
+    ).toEqual({
+      kind: 'done',
+      exitCode: 0,
+      landing: { kind: 'skipped', cleanupError: 'Cleanup failed' }
+    })
+    expect(state().status).toBe('closed')
+    expect(calls('reopen')).toHaveLength(0)
+    expect(calls('unclaim')).toHaveLength(0)
+    expect(cleanupSpy).toHaveBeenCalledTimes(1)
+    const events = output
+      .join('')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    expect(events.at(-1)).toEqual({
+      event: 'done',
+      id: 'task-1.1',
+      outcome: 'skipped',
+      cleanupError: 'Cleanup failed'
+    })
+    const path = events.find((event) => event.event === 'attempt-started')?.worktree
+    if (typeof path !== 'string') throw new Error('Missing worktree')
+    expect(existsSync(path)).toBe(true)
+    expect(git(['branch', '--list', 'simmer/parent-9-child-*'])).not.toBe('')
+  } finally {
+    stdoutSpy.mockRestore()
+    cleanupSpy.mockRestore()
+    for (const key of ['PATH', 'BEADS_ACTOR'] as const) {
+      const value = originalEnvironment[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
 })
 
 test.each(['stale-commit', 'amend'])('%s retry checks commits since the child started', (mode) => {

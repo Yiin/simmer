@@ -9,7 +9,11 @@ import { landingNote } from './status'
 export type ChildResult =
   | { kind: 'lost'; exitCode: 3 }
   | { kind: 'blocked'; exitCode: 2; reason: string }
-  | { kind: 'done'; exitCode: 0; landing: LandingResult | { kind: 'skipped' } }
+  | {
+      kind: 'done'
+      exitCode: 0
+      landing: LandingResult | { kind: 'skipped'; cleanupError?: string }
+    }
 
 export class ClaimLostError extends Error {}
 
@@ -188,8 +192,16 @@ export async function runChild(options: {
       await heartbeat
       if (heartbeatError) throw heartbeatError
       if (!failure) {
-        let landing: LandingResult | { kind: 'skipped' } = { kind: 'skipped' }
-        if (!options.noLand) {
+        let landing: LandingResult | { kind: 'skipped'; cleanupError?: string } = {
+          kind: 'skipped'
+        }
+        if (options.noLand && commits.length === 0) {
+          try {
+            await git.cleanupWorktree(worktree)
+          } catch (error) {
+            landing = { kind: 'skipped', cleanupError: errorMessage(error) }
+          }
+        } else if (!options.noLand) {
           if (options.recordRecovery) {
             await bd.note(
               epic,
@@ -227,7 +239,10 @@ export async function runChild(options: {
           event(landing.kind, landing)
           if (landing.kind === 'conflict') return await block(landing.message)
         }
-        event('done', { outcome: landing.kind })
+        event('done', {
+          outcome: landing.kind,
+          ...(landing.cleanupError ? { cleanupError: landing.cleanupError } : {})
+        })
         return { kind: 'done', exitCode: 0, landing }
       }
       if (attempt === 1) {
