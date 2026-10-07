@@ -5,6 +5,10 @@ export type Issue = {
   description: string
   acceptanceCriteria: string
   notes: string
+  assignee: string
+  labels: string[]
+  comments: { id: string; text: string }[]
+  parent?: string
 }
 
 export type ClaimResult = { kind: 'claimed' } | { kind: 'lost' }
@@ -33,13 +37,33 @@ function issue(value: unknown): Issue {
     }
     return entry
   }
+  const labels: unknown = Reflect.get(fields, 'labels') ?? []
+  if (!Array.isArray(labels) || !labels.every((label: unknown) => typeof label === 'string')) {
+    throw new Error('Invalid bd JSON: labels must be strings')
+  }
+  const comments: unknown = Reflect.get(fields, 'comments') ?? []
+  if (!Array.isArray(comments)) throw new Error('Invalid bd JSON: comments must be an array')
   return {
     id: text('id', true),
     title: text('title', true),
     status: text('status', true),
     description: text('description'),
     acceptanceCriteria: text('acceptance_criteria'),
-    notes: text('notes')
+    notes: text('notes'),
+    assignee: text('assignee'),
+    labels,
+    comments: comments.map((comment: unknown) => {
+      if (typeof comment !== 'object' || comment === null) {
+        throw new Error('Invalid bd JSON: comment must be an object')
+      }
+      const id: unknown = Reflect.get(comment, 'id')
+      const text: unknown = Reflect.get(comment, 'text')
+      if (typeof id !== 'string' || typeof text !== 'string') {
+        throw new Error('Invalid bd JSON: comment needs a string id and text')
+      }
+      return { id, text }
+    }),
+    ...(text('parent') ? { parent: identifier(text('parent')) } : {})
   }
 }
 
@@ -98,8 +122,10 @@ export class Bd {
     return issues(await this.run(['list', '--parent', identifier(epic), '--ready', '--limit', '0']))
   }
 
-  async show(id: string): Promise<Issue> {
-    const result = issues(await this.run(['show', identifier(id)]))
+  async show(id: string, includeComments = false): Promise<Issue> {
+    const result = issues(
+      await this.run(['show', identifier(id), ...(includeComments ? ['--include-comments'] : [])])
+    )
     const found = result[0]
     if (result.length !== 1 || found?.id !== id) {
       throw new Error(`Invalid bd JSON: expected issue ${id}`)
@@ -116,7 +142,10 @@ export class Bd {
       await this.run(['update', identifier(id), '--claim'])
     } catch (error) {
       // bd 1.3.1 reports a claim held by another actor as exit 1, not the exit 13 of a guard.
-      if (error instanceof BdError && /already claimed|held by/.test(error.message)) {
+      if (
+        error instanceof BdError &&
+        (error.exitCode === 13 || /already claimed by/.test(error.message))
+      ) {
         return { kind: 'lost' }
       }
       throw error
@@ -126,6 +155,24 @@ export class Bd {
 
   async heartbeat(id: string): Promise<void> {
     await this.run(['heartbeat', identifier(id)])
+  }
+
+  async reopen(id: string, reason: string, resume = true): Promise<void> {
+    await this.run(['reopen', identifier(id), '--reason', reason])
+    if (resume) await this.run(['update', identifier(id), '--status', 'in_progress'])
+  }
+
+  async block(id: string): Promise<void> {
+    await this.run([
+      'update',
+      identifier(id),
+      '--status',
+      'blocked',
+      '--assignee',
+      '',
+      '--if-assignee',
+      this.actor
+    ])
   }
 
   async unclaim(id: string): Promise<void> {

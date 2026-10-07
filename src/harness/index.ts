@@ -7,7 +7,7 @@ import type { RunOptions } from './process'
 export type { HarnessResult, Usage } from './process'
 
 export function runHarness(
-  options: Pick<RunOptions, 'prompt' | 'cwd' | 'watchdogIntervalMs'> & {
+  options: Pick<RunOptions, 'prompt' | 'cwd' | 'watchdogIntervalMs' | 'env' | 'signal'> & {
     config: Pick<Config, 'harness' | 'harnessPaths' | 'models' | 'watchdogMinutes'>
   }
 ) {
@@ -18,6 +18,8 @@ export function runHarness(
     models: config.models,
     binary: config.harnessPaths[config.harness],
     watchdogMinutes: config.watchdogMinutes,
+    env: options.env,
+    signal: options.signal,
     watchdogIntervalMs: options.watchdogIntervalMs
   })
 }

@@ -53,8 +53,22 @@ try {
     ) {
       throw new Error('--harness must be claude, codex, or pi')
     }
-    await loadConfig()
-    throw new Error(`simmer ${command} is not implemented yet`)
+    const config = await loadConfig()
+    if (values.harness !== undefined) config.harness = values.harness
+    if (command === 'child') {
+      const { runChild } = await import('./child')
+      const result = await runChild({
+        id: target,
+        cwd: process.cwd(),
+        config,
+        worktree: values.worktree,
+        noLand: values['no-land'],
+        json: values.json
+      })
+      process.exitCode = result.exitCode
+    } else {
+      throw new Error(`simmer ${command} is not implemented yet`)
+    }
   }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)

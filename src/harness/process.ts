@@ -21,6 +21,8 @@ export type RunOptions = {
   binary: string
   watchdogMinutes: number
   watchdogIntervalMs?: number
+  env?: NodeJS.ProcessEnv
+  signal?: AbortSignal
 }
 export type StreamEvent = {
   finalMessage?: string
@@ -160,10 +162,19 @@ export async function runProcess(
   const worker = spawn(command[0] ?? '', command.slice(1), {
     cwd: options.cwd,
     detached: true,
-    env: { ...process.env, SIMMER_HARNESS_ID: workerId },
+    env: { ...process.env, ...options.env, SIMMER_HARNESS_ID: workerId },
     stdio: ['ignore', 'pipe', 'ignore']
   })
   const watchdogMilliseconds = options.watchdogMinutes * 60000
+  function abort() {
+    if (!closed && worker.pid) {
+      void killTree(worker.pid, workerId).catch((error: unknown) => {
+        worker.emit('error', error)
+      })
+    }
+  }
+  options.signal?.addEventListener('abort', abort, { once: true })
+  if (options.signal?.aborted) abort()
 
   function consume(line: string) {
     let value: unknown
@@ -240,6 +251,7 @@ export async function runProcess(
     }
   } finally {
     closed = true
+    options.signal?.removeEventListener('abort', abort)
     clearInterval(timer)
   }
 }

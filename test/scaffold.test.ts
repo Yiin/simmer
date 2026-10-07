@@ -127,7 +127,6 @@ test('partial nested config keeps unspecified defaults', async () => {
 
 test.each([
   ['run', 'epic'],
-  ['child', 'bead'],
   ['status', 'epic']
 ])('%s reports its stub without claiming success', (command, target) => {
   expect(run([command, target])).toEqual({

@@ -82,7 +82,11 @@ test('readyChildren reads all direct ready children with bd ready semantics', as
       status: 'open',
       description: 'Do it',
       acceptanceCriteria: 'Green gate',
-      notes: 'Prior attempt'
+      notes: 'Prior attempt',
+      assignee: '',
+      labels: [],
+      comments: [],
+      parent: 'epic-1'
     },
     {
       id: 'epic-1.3',
@@ -90,7 +94,10 @@ test('readyChildren reads all direct ready children with bd ready semantics', as
       status: 'open',
       description: '',
       acceptanceCriteria: '',
-      notes: ''
+      notes: '',
+      assignee: '',
+      labels: [],
+      comments: []
     }
   ])
 })
@@ -98,6 +105,23 @@ test('readyChildren reads all direct ready children with bd ready semantics', as
 test('readyChildren returns an empty array when no children are ready', async () => {
   respond({ arguments: ['list', '--parent', 'epic-1', '--ready', '--limit', '0'], stdout: '[]' })
   expect(await adapter.readyChildren('epic-1')).toEqual([])
+})
+
+test('show preserves UUID comment ids from bd 1.3.1', async () => {
+  respond({
+    arguments: ['show', 'epic-1.2', '--include-comments'],
+    stdout: JSON.stringify([
+      {
+        id: 'epic-1.2',
+        title: 'Child',
+        status: 'closed',
+        comments: [{ id: '7c6467f0-7db7-4f35-bfd8-cb0c9094de31', text: 'Research result' }]
+      }
+    ])
+  })
+  expect((await adapter.show('epic-1.2', true)).comments).toEqual([
+    { id: '7c6467f0-7db7-4f35-bfd8-cb0c9094de31', text: 'Research result' }
+  ])
 })
 
 test('children includes closed and blocked children without the default row limit', async () => {
@@ -112,7 +136,10 @@ test('children includes closed and blocked children without the default row limi
       status: 'closed',
       description: '',
       acceptanceCriteria: '',
-      notes: ''
+      notes: '',
+      assignee: '',
+      labels: [],
+      comments: []
     }
   ])
 })
@@ -143,6 +170,35 @@ test('claim throws ordinary failures', async () => {
   await expect(adapter.claim('epic-1.2')).rejects.toThrow(
     'bd update failed (exit 1): database unavailable'
   )
+})
+
+test('claim returns lost for a stale guard exit', async () => {
+  respond({ arguments: ['update', 'epic-1.2', '--claim'], exitCode: 13 })
+  expect(await adapter.claim('epic-1.2')).toEqual({ kind: 'lost' })
+})
+
+test('reopen clears closure before setting in-progress', async () => {
+  respond(
+    { arguments: ['reopen', 'epic-1.2', '--reason', 'red gate'] },
+    { arguments: ['update', 'epic-1.2', '--status', 'in_progress'] }
+  )
+  expect(await adapter.reopen('epic-1.2', 'red gate')).toBeUndefined()
+})
+
+test('block releases the claim and sets blocked in one guarded write', async () => {
+  respond({
+    arguments: [
+      'update',
+      'epic-1.2',
+      '--status',
+      'blocked',
+      '--assignee',
+      '',
+      '--if-assignee',
+      'worker 7'
+    ]
+  })
+  expect(await adapter.block('epic-1.2')).toBeUndefined()
 })
 
 test('heartbeat renews the same issue each time the worker calls it', async () => {
@@ -294,3 +350,11 @@ test('an empty actor fails before starting bd', () => {
     'bd actor must be a non-empty string'
   )
 })
+
+test.each(['database lock held by server', 'already claimed lease backend unavailable'])(
+  'claim does not mistake %s for ownership loss',
+  async (message) => {
+    respond({ arguments: ['update', 'epic-1.2', '--claim'], exitCode: 1, stderr: message })
+    await expect(adapter.claim('epic-1.2')).rejects.toThrow(message)
+  }
+)

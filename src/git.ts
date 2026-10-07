@@ -12,7 +12,7 @@ export type Worktree = {
 
 export type LandingResult = (
   | { kind: 'landed' }
-  | { kind: 'deferred'; files: string[] }
+  | { kind: 'deferred'; files: string[]; reason?: string }
   | { kind: 'conflict'; message: string }
   | { kind: 'push-failed'; message: string }
 ) & { cleanupError?: string }
@@ -49,14 +49,25 @@ export class Git {
 
   async createWorktree(options: {
     epic: string
-    path: string
+    path?: string
     adopt?: boolean
+    branch?: string
   }): Promise<Worktree> {
     const runBranch = `simmer/${options.epic}`
     await this.run(['check-ref-format', '--branch', runBranch])
     await this.run(['check-ref-format', '--branch', this.options.base])
-    const path = resolve(options.path)
-    let branch = `${runBranch}-child-${randomUUID()}`
+    let path: string
+    if (options.path) {
+      path = resolve(options.path)
+    } else {
+      const gitDirectory = (
+        await this.run(['rev-parse', '--path-format=absolute', '--git-common-dir'])
+      ).trim()
+      const temporaryDirectory = join(gitDirectory, 'simmer-tmp')
+      mkdirSync(temporaryDirectory, { recursive: true })
+      path = mkdtempSync(join(temporaryDirectory, 'child-'))
+    }
+    let branch = options.branch ?? `${runBranch}-child-${randomUUID()}`
     if (options.adopt) {
       const commonDirectory = resolve(
         path,
@@ -87,11 +98,17 @@ export class Git {
   }
 
   async newCommits(worktree: Worktree): Promise<string[]> {
+    const branch = (await this.run(['symbolic-ref', '--short', 'HEAD'], worktree.path)).trim()
+    if (branch !== worktree.branch) throw new Error('Worker changed the worktree branch')
     const output = await this.run(
       ['rev-list', '--reverse', `${worktree.start}..HEAD`],
       worktree.path
     )
     return output.trim() === '' ? [] : output.trim().split('\n')
+  }
+
+  async hasUncommittedChanges(worktree: Worktree): Promise<boolean> {
+    return (await this.run(['status', '--porcelain'], worktree.path)).trim() !== ''
   }
 
   private async branchWorktree(
@@ -167,7 +184,12 @@ export class Git {
     const newTip = (await this.run(['rev-parse', `refs/heads/${sourceBranch}`])).trim()
     const checkout = await this.branchWorktree(branch)
     if (checkout?.busy) return { kind: 'deferred', files: [] }
-    await this.run(['merge-base', '--is-ancestor', oldTip, newTip])
+    try {
+      await this.run(['merge-base', '--is-ancestor', oldTip, newTip])
+    } catch (error) {
+      if (!(error instanceof GitError) || error.exitCode !== 1) throw error
+      return { kind: 'conflict', message: error.message }
+    }
     if (!checkout) {
       await this.run(['update-ref', `refs/heads/${branch}`, newTip, oldTip])
       return { kind: 'landed' }
@@ -183,7 +205,8 @@ export class Git {
       if (!(error instanceof GitError)) throw error
       return {
         kind: 'deferred',
-        files: await this.overlappingFiles(checkout.path, oldTip, newTip)
+        files: await this.overlappingFiles(checkout.path, oldTip, newTip),
+        reason: error.message
       }
     }
     if ((await this.run(['rev-parse', 'HEAD'], checkout.path)).trim() !== newTip) {

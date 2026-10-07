@@ -610,7 +610,11 @@ test('defers when an ignored file appears between the overlap check and merge', 
   const { writeFileSync } = await import('node:fs')
   writeFileSync(${JSON.stringify(join(repository, '.env'))}, 'local secret\\n')
 }`)
-  expect(await adapter.land(worktree)).toEqual({ kind: 'deferred', files: ['.env'] })
+  expect(await adapter.land(worktree)).toEqual({
+    kind: 'deferred',
+    files: ['.env'],
+    reason: expect.stringContaining('git merge failed')
+  })
   expect(readFileSync(join(repository, '.env'), 'utf8')).toBe('local secret\n')
 })
 
@@ -751,4 +755,20 @@ test('keeps unmerged child commits when safe branch deletion refuses', async () 
   expect(await git(['rev-parse', 'main'])).toBe(landedTip)
   expect(await git(['rev-parse', worktree.branch])).toBe(unmergedTip)
   expect(await git(['show', `${worktree.branch}:extra.txt`])).toBe('keep')
+})
+
+test('a run branch moved during integration returns conflict', async () => {
+  const worktree = await worker()
+  await commit(worktree.path, 'child.txt', 'child\n')
+  const concurrent = join(directory, 'concurrent')
+  await git(['worktree', 'add', '-b', 'concurrent', concurrent, 'main'])
+  const movedTip = await commit(concurrent, 'other.txt', 'other\n')
+  await interceptGit(`if (argumentsList[4] === 'rev-parse' &&
+      argumentsList[5] === 'refs/heads/simmer/epic-1') {
+    await run(['update-ref', 'refs/heads/simmer/epic-1', '${movedTip}'])
+  }`)
+  const result = await adapter.integrate(worktree)
+  expect(result.kind).toBe('conflict')
+  expect(await git(['rev-parse', 'simmer/epic-1'])).toBe(movedTip)
+  expect(await git(['log', '-1', '--format=%s'], worktree.path)).toBe('child.txt')
 })
