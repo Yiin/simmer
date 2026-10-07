@@ -42,7 +42,9 @@ LOG=$(mktemp "/var/tmp/simmer-<EPIC>.XXXXXX.jsonl")
 nohup setsid simmer run <EPIC> --json >"$LOG" 2>&1 &
 ```
 
-`--json` writes one JSON event per line to stdout. Watch the log with your harness's background monitor (for example, tail it and relay each new line). Relay dispatches, landings, deferrals, blocked children, and errors. Stay quiet between events.
+`--json` writes one JSON object per line to stdout, with an `event` field. Watch the log with your harness's background monitor (for example, tail it and relay each new line). Relay `claimed`, `landed`, `deferred`, `blocked`, `conflict`, `push-failed`, `claim-lost`, `child-error`, and `run-finished`. Stay quiet on `attempt-started`, `gate`, and `attempt-finished` unless one shows a failure.
+
+`run-finished` carries the exit code: `0` when nothing is left and nothing is deferred, `4` when the run ended with deferred landings or blocked children, `1` on a fatal error. A second `simmer run` on the same epic on the same machine is refused while the first one holds its lock.
 
 To check progress at any time:
 
@@ -120,5 +122,5 @@ simmer does not close the epic. Close it yourself with `bd close <EPIC>` once ev
 ## Cautions
 
 - The gate is a script and cannot drive a browser. Integrated QA of a user-visible change happens inside the worker, through cook-it's tester stage, in the worker's own worktree.
-- simmer verifies a child by its commits. A research child whose deliverable is a bd comment makes no commit, so simmer counts it as failed. Run research children with `/cook-it` in an attended session instead.
+- simmer verifies a child by its commits. A research child whose deliverable is a bd comment or note makes no commit. Give it the `research` label (`bd label add <child> research`) before the run. simmer then accepts a closed bead plus a new note or comment in place of a commit.
 - A fresh worktree has no installed dependencies. If the gate needs them, put the install in the gate command (for example, `bun install --frozen-lockfile && bun run test`).
