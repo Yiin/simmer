@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { Bd } from './bd'
+import { Bd, BdError } from './bd'
 import type { Config } from './config'
 import { Git, type LandingResult } from './git'
 import { runHarness } from './harness'
@@ -66,6 +66,10 @@ export async function runChild(options: {
         try {
           await bd.heartbeat(id)
         } catch (error) {
+          if (error instanceof BdError && /not claimable: .*status closed/.test(error.message)) {
+            heartbeatPaused = true
+            return
+          }
           process.stderr.write(`Heartbeat for ${id}: ${errorMessage(error)}\n`)
           try {
             const current = await bd.show(id)

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { runChild } from '../src/child'
@@ -24,6 +24,7 @@ beforeEach(() => {
   writeFileSync(join(directory, 'state.json'), '{"status":"open","assignee":""}')
   writeFileSync(join(directory, 'calls.jsonl'), '')
   writeFileSync(join(directory, 'prompts.jsonl'), '')
+  writeFileSync(join(directory, 'closed-heartbeats.jsonl'), '')
   writeConfig()
   writeFileSync(join(repository, 'unrelated.txt'), 'initial\n')
   git(['init', '-q', '-b', 'main'])
@@ -35,7 +36,7 @@ beforeEach(() => {
   binary(
     'bd',
     `
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 const argumentsList = process.argv.slice(2)
 const command = argumentsList[0]
 const statePath = ${JSON.stringify(join(directory, 'state.json'))}
@@ -62,11 +63,19 @@ if (command === 'show') {
 } else if (command === 'close') {
   state.status = 'closed'
 } else if (command === 'heartbeat' && state.status === 'closed' &&
-  readFileSync(${JSON.stringify(join(directory, 'scenario'))}, 'utf8') === 'retry') {
-  await Bun.sleep(200)
-  process.stderr.write('The bead is closed')
+  ['retry', 'heartbeat-closed'].includes(
+    readFileSync(${JSON.stringify(join(directory, 'scenario'))}, 'utf8'))) {
+  if (scenario === 'heartbeat-closed') {
+    const attemptsPath = ${JSON.stringify(join(directory, 'attempts'))}
+    const attempt = existsSync(attemptsPath) ? Number(readFileSync(attemptsPath, 'utf8')) : 0
+    appendFileSync(${JSON.stringify(join(directory, 'closed-heartbeats.jsonl'))},
+      JSON.stringify({ attempt }) + '\\n')
+  } else {
+    await Bun.sleep(200)
+  }
+  process.stderr.write('issue not claimable: task-1.1 has status closed')
   process.exit(1)
-} else if (command === 'heartbeat' && scenario.startsWith('heartbeat-')) {
+} else if (command === 'heartbeat' && ['heartbeat-blip', 'heartbeat-lost'].includes(scenario)) {
   const countPath = ${JSON.stringify(join(directory, 'heartbeats'))}
   const count = Number(readFileSync(countPath, 'utf8')) + 1
   writeFileSync(countPath, String(count))
@@ -106,7 +115,7 @@ const attempt = existsSync(countPath) ? Number(readFileSync(countPath, 'utf8')) 
 writeFileSync(countPath, String(attempt))
 appendFileSync(${JSON.stringify(join(directory, 'prompts.jsonl'))},
   JSON.stringify({ arguments: process.argv.slice(2), cwd: process.cwd() }) + '\\n')
-if (scenario.startsWith('heartbeat-')) {
+if (['heartbeat-blip', 'heartbeat-lost'].includes(scenario)) {
   const countPath = ${JSON.stringify(join(directory, 'heartbeats'))}
   const deadline = Date.now() + 3000
   while (Number(readFileSync(countPath, 'utf8')) < 2 && Date.now() < deadline) {
@@ -114,6 +123,7 @@ if (scenario.startsWith('heartbeat-')) {
   }
   if (scenario === 'heartbeat-lost') await Bun.sleep(150)
 }
+if (scenario === 'heartbeat-closed' && attempt === 2) await Bun.sleep(200)
 if (scenario === 'slow' || scenario === 'watchdog') await Bun.sleep(250)
 if (scenario === 'watchdog') setInterval(() => {}, 1000)
 else {
@@ -121,7 +131,7 @@ else {
       'research-old-note', 'unlabeled-note'].includes(scenario) &&
       !(scenario === 'stale-commit' && attempt === 2)) {
     const red = ['red-twice', 'dirty-fix', 'huge-output'].includes(scenario) ||
-      (scenario === 'retry' && attempt === 1)
+      (['retry', 'heartbeat-closed'].includes(scenario) && attempt === 1)
     writeFileSync('child.txt', (red ? 'red' : 'green') + '\\n' + attempt + '\\n')
     if (scenario === 'branch-switch') {
       Bun.spawnSync(['git', 'switch', '-qc', 'wrong-branch'])
@@ -152,6 +162,18 @@ else {
       !(['stale-commit', 'amend'].includes(scenario) && attempt === 1)) {
     const result = Bun.spawnSync(['bd', 'close', 'task-1.1', '--reason', 'done'])
     if (result.exitCode !== 0) throw new Error(result.stderr.toString())
+  }
+  if (scenario === 'heartbeat-closed' && attempt === 1) {
+    const closedPath = ${JSON.stringify(join(directory, 'closed-heartbeats.jsonl'))}
+    const deadline = Date.now() + 1000
+    while (Date.now() < deadline) {
+      const lines = existsSync(closedPath)
+        ? readFileSync(closedPath, 'utf8').trim().split('\\n').filter(Boolean)
+        : []
+      if (lines.some((line) => JSON.parse(line).attempt === 1)) break
+      await Bun.sleep(10)
+    }
+    await Bun.sleep(120)
   }
   const output = process.argv[2] === 'exec'
     ? [{ type: 'item.completed', item: { type: 'agent_message', text: 'Done' } },
@@ -698,6 +720,11 @@ test.each(['heartbeat-blip', 'heartbeat-lost'])(
     const originalEnvironment = { PATH: process.env.PATH, BEADS_ACTOR: process.env.BEADS_ACTOR }
     process.env.PATH = environment.PATH
     process.env.BEADS_ACTOR = environment.BEADS_ACTOR
+    const stderr: string[] = []
+    const stderrSpy = spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderr.push(String(chunk))
+      return true
+    })
     try {
       const running = runChild({
         id: 'task-1.1',
@@ -716,11 +743,15 @@ test.each(['heartbeat-blip', 'heartbeat-lost'])(
         expect((await running).exitCode).toBe(0)
         expect(calls('heartbeat').length).toBeGreaterThanOrEqual(2)
         expect(state().status).toBe('closed')
+        expect(stderr.join('')).toContain(
+          'Heartbeat for task-1.1: bd heartbeat failed (exit 1): Dolt unavailable'
+        )
       }
       const count = calls('heartbeat').length
       await Bun.sleep(120)
       expect(calls('heartbeat')).toHaveLength(count)
     } finally {
+      stderrSpy.mockRestore()
       for (const key of ['PATH', 'BEADS_ACTOR'] as const) {
         const value = originalEnvironment[key]
         if (value === undefined) delete process.env[key]
@@ -729,3 +760,55 @@ test.each(['heartbeat-blip', 'heartbeat-lost'])(
     }
   }
 )
+
+test('a heartbeat against a closed bead stays quiet and resumes after reopen', async () => {
+  scenario = 'heartbeat-closed'
+  writeFileSync(join(directory, 'scenario'), scenario)
+  const config = await loadConfig(repository)
+  const originalEnvironment = { PATH: process.env.PATH, BEADS_ACTOR: process.env.BEADS_ACTOR }
+  process.env.PATH = environment.PATH
+  process.env.BEADS_ACTOR = environment.BEADS_ACTOR
+  const stderr: string[] = []
+  const stderrSpy = spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+    stderr.push(String(chunk))
+    return true
+  })
+  try {
+    const result = await runChild({
+      id: 'task-1.1',
+      cwd: repository,
+      config,
+      json: true,
+      heartbeatIntervalMs: 30
+    })
+    expect(result.exitCode).toBe(0)
+    expect(state().status).toBe('closed')
+    const all = records('calls.jsonl')
+    const isCommand = (call: Record<string, unknown>, name: string) =>
+      Array.isArray(call.arguments) && call.arguments[0] === name
+    const firstCloseIndex = all.findIndex((call) => isCommand(call, 'close'))
+    const reopenIndex = all.findIndex((call) => isCommand(call, 'reopen'))
+    const secondCloseIndex = all.findIndex(
+      (call, index) => index > reopenIndex && isCommand(call, 'close')
+    )
+    expect(firstCloseIndex).toBeGreaterThanOrEqual(0)
+    expect(reopenIndex).toBeGreaterThan(firstCloseIndex)
+    expect(secondCloseIndex).toBeGreaterThan(reopenIndex)
+    const firstAttemptClosedResponses = records('closed-heartbeats.jsonl').filter(
+      (entry) => entry.attempt === 1
+    )
+    expect(firstAttemptClosedResponses).toHaveLength(1)
+    const heartbeatsBetween = (start: number, end: number) =>
+      all.filter((call, index) => index > start && index < end && isCommand(call, 'heartbeat'))
+        .length
+    expect(heartbeatsBetween(reopenIndex, secondCloseIndex)).toBeGreaterThanOrEqual(1)
+    expect(stderr.join('')).toBe('')
+  } finally {
+    stderrSpy.mockRestore()
+    for (const key of ['PATH', 'BEADS_ACTOR'] as const) {
+      const value = originalEnvironment[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+})
