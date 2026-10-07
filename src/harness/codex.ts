@@ -6,10 +6,10 @@ export function run(options: RunOptions) {
       options.binary,
       'exec',
       '--json',
+      // workspace-write keeps every .git path read-only, even with --add-dir, so a worker in a
+      // linked worktree could not commit. Claude and Pi workers run unsandboxed too.
       '-s',
-      'workspace-write',
-      '-c',
-      'sandbox_workspace_write.network_access=true',
+      'danger-full-access',
       '-C',
       options.cwd,
       rolePrompt(options.prompt, options.models)

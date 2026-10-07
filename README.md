@@ -81,7 +81,7 @@ Nothing is kept in memory across commands. `simmer run <epic>` after a crash fin
 | Harness | Invocation |
 |---|---|
 | Claude Code | `claude -p --output-format stream-json --agents <json>` |
-| Codex | `codex exec --json` |
+| Codex | `codex exec --json -s danger-full-access` (the workspace-write sandbox cannot write a worktree's git dir) |
 | Pi | `pi -p --mode json` with pi-subagents |
 
 Each adapter returns the exit status, the final message, and token usage.
