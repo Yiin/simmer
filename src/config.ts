@@ -50,7 +50,25 @@ function roleModels(value: unknown, harness: Harness, defaults: RoleModels): Rol
   const models = { ...defaults }
   for (const role of roles) {
     if (fields[role] !== undefined) {
-      models[role] = text(fields[role], `models.${harness}.${role}`)
+      const field = `models.${harness}.${role}`
+      const model = text(fields[role], field)
+      const trimmed = model.trim()
+      if (trimmed.startsWith('claude:')) {
+        if (harness === 'claude') {
+          invalid(field, 'cannot use claude:<model>; use a plain Claude model name')
+        }
+        const claudeModel = trimmed.slice('claude:'.length).trim()
+        if (claudeModel === '') invalid(field, 'must name a model after claude:')
+        if (
+          [...claudeModel].some((character) => character.charCodeAt(0) < 32 || character === '\x7f')
+        ) {
+          invalid(field, 'must not contain control characters in the Claude model')
+        }
+        if (claudeModel.startsWith('-')) invalid(field, 'must not start the Claude model with -')
+        models[role] = `claude:${claudeModel}`
+      } else {
+        models[role] = model
+      }
     }
   }
   return models
@@ -133,8 +151,8 @@ export async function loadConfig(projectRoot = process.cwd()): Promise<Config> {
         reviewer: 'opus',
         tester: 'opus'
       }),
-      codex: roleModels(models.codex, 'codex', {}),
-      pi: roleModels(models.pi, 'pi', {})
+      codex: roleModels(models.codex, 'codex', { reviewer: 'claude:opus' }),
+      pi: roleModels(models.pi, 'pi', { reviewer: 'claude:opus' })
     }
   }
 }

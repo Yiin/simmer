@@ -1,9 +1,18 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import type { Harness } from '../src/config'
 import { loadConfig } from '../src/config'
 import { runHarness } from '../src/harness'
+import { rolePrompt } from '../src/harness/process'
 
 let directory: string
 let originalPath: string | undefined
@@ -186,6 +195,11 @@ implementer: Implement the approved plan and follow the project rules.
 reviewer: Review the plan and code against the spec. Report errors and risks.
 tester: Check the acceptance criteria and run the project gate.`
 
+const defaultRoleText = rolePrompt(
+  'Do the task. Keep "quotes" and $variables literal.\nSecond line.',
+  { reviewer: 'claude:opus' }
+)
+
 test('Codex parses completed items and usage with workspace and network flags', async () => {
   fake(
     'codex',
@@ -208,7 +222,7 @@ test('Codex parses completed items and usage with workspace and network flags', 
     killedByWatchdog: false
   })
   expect(invocation()).toEqual({
-    arguments: ['exec', '--json', '-s', 'danger-full-access', '-C', directory, roleText],
+    arguments: ['exec', '--json', '-s', 'danger-full-access', '-C', directory, defaultRoleText],
     cwd: directory,
     stdin: ''
   })
@@ -255,21 +269,27 @@ test('Pi uses its configured binary and totals completed assistant usage only', 
     killedByWatchdog: false
   })
   expect(invocation()).toEqual({
-    arguments: ['-p', '--mode', 'json', roleText],
+    arguments: ['-p', '--mode', 'json', defaultRoleText],
     cwd: directory,
     stdin: ''
   })
 })
 
 test.each(['codex', 'pi'] satisfies Harness[])(
-  '%s defaults leave every role unnamed',
+  '%s defaults run the reviewer through Claude Opus',
   async (harness) => {
     fake(harness, '')
     await run(harness)
     const prompt = invocation().arguments.at(-1) ?? ''
-    expect(prompt).toBe(roleText)
-    expect(prompt).not.toContain('(model:')
-    expect(prompt).not.toContain('opus')
+    expect(prompt).toBe(defaultRoleText)
+    expect(prompt).toContain('reviewer (model: claude:opus):')
+    expect(prompt).toContain(
+      'claude -p --model opus --permission-mode bypassPermissions "$(cat "$brief")" < /dev/null'
+    )
+    for (const role of ['planner', 'implementer', 'tester']) {
+      expect(prompt).toContain(`${role}:`)
+      expect(prompt).not.toContain(`${role} (model:`)
+    }
     expect(prompt).not.toContain('sonnet')
   }
 )
@@ -324,6 +344,76 @@ test.each(['codex', 'pi'] satisfies Harness[])(
         .replace('reviewer:', `reviewer (model: ${harness}-review):`)
         .replace('tester:', `tester (model: ${harness}-test):`)
     )
+  }
+)
+
+test.each(['codex', 'pi'] satisfies Harness[])(
+  '%s prints the configured Claude Sonnet command',
+  async (harness) => {
+    writeFileSync(
+      join(directory, 'simmer.json'),
+      JSON.stringify({ models: { [harness]: { reviewer: 'claude:sonnet' } } })
+    )
+    fake(harness, '')
+    await run(harness)
+    const prompt = invocation().arguments.at(-1) ?? ''
+    expect(prompt).toContain('reviewer (model: claude:sonnet):')
+    expect(prompt).toContain(
+      'claude -p --model sonnet --permission-mode bypassPermissions "$(cat "$brief")" < /dev/null'
+    )
+    expect(prompt).toContain('Give this process a read-only brief.')
+    expect(prompt).toContain('--output-format json to inspect modelUsage metadata')
+  }
+)
+
+test.each(['planner', 'implementer', 'reviewer', 'tester'])(
+  'the %s Claude command preserves arguments, stdin, cleanup, and exit status',
+  async (role) => {
+    for (const model of [
+      'opus[1m]',
+      "sonnet'; touch injected; # $(touch injected) `touch injected` *"
+    ]) {
+      writeFileSync(
+        join(directory, 'simmer.json'),
+        JSON.stringify({
+          models: { codex: { [role]: `claude:${model}` } }
+        })
+      )
+      fake('codex', '')
+      await run('codex')
+      const prompt = invocation().arguments.at(-1) ?? ''
+      expect(prompt).toContain('Give this process a read-only brief.')
+      expect(prompt).toContain('Return proposed changes for the main worker to apply.')
+      const section = prompt.slice(prompt.indexOf(`${role} (model:`))
+      const script = section.match(/```sh\n([\s\S]*?)\n```/)?.[1]
+      expect(script).toBeDefined()
+      if (script === undefined) throw new Error('Claude role script is missing')
+      const brief =
+        'Read files here. Keep "quotes", \'apostrophes\', $variables, $(touch injected), and `touch injected` literal.\nSecond line.'
+      const command = script.replace('REPLACE_WITH_SELF_CONTAINED_BRIEF', brief)
+      for (const exitCode of [0, 9]) {
+        fake(
+          'claude',
+          `import { readdirSync } from 'node:fs'
+if (!readdirSync(process.env.TMPDIR).some((name) => name.startsWith('simmer-${role}-'))) {
+  process.exit(99)
+}
+process.exitCode = ${exitCode}`
+        )
+        const result = Bun.spawnSync(['sh', '-c', command], {
+          cwd: directory,
+          env: { ...process.env, TMPDIR: directory }
+        })
+        expect(result.exitCode).toBe(exitCode)
+        expect(invocation()).toEqual({
+          arguments: ['-p', '--model', model, '--permission-mode', 'bypassPermissions', brief],
+          cwd: directory,
+          stdin: ''
+        })
+        expect(readdirSync(directory).filter((name) => name.startsWith('simmer-'))).toEqual([])
+        expect(existsSync(join(directory, 'injected'))).toBe(false)
+      }
+    }
   }
 )
 

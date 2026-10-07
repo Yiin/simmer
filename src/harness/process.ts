@@ -110,7 +110,31 @@ export function agents(models: RoleModels) {
 export function rolePrompt(prompt: string, models: RoleModels): string {
   const roles = Object.entries(agents(models)).map(([role, agent]) => {
     const model = agent.model === undefined ? '' : ` (model: ${agent.model})`
-    return `${role}${model}: ${agent.prompt}`
+    const description = `${role}${model}: ${agent.prompt}`
+    if (!agent.model?.startsWith('claude:')) return description
+    const claudeModel = agent.model.slice('claude:'.length)
+    const argument = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(claudeModel)
+      ? claudeModel
+      : `'${claudeModel.replaceAll("'", "'\\''")}'`
+    return `${description}
+Run this role as a one-shot Claude Code process using claude from PATH.
+Replace the brief placeholder with a self-contained brief. Cite file paths instead of pasting whole diffs.
+Give this process a read-only brief. It must not edit repository files.
+Return proposed changes for the main worker to apply.
+Choose a quoted heredoc delimiter that does not appear as a line in the brief.
+Execute the complete script in one tool call in the current directory:
+\`\`\`sh
+(
+  brief=$(mktemp "\${TMPDIR:-/tmp}/simmer-${role}-XXXXXX") || exit 1
+  trap 'rm -f "\${brief:?}"' EXIT
+  cat > "$brief" <<'SIMMER_ROLE_BRIEF'
+REPLACE_WITH_SELF_CONTAINED_BRIEF
+SIMMER_ROLE_BRIEF
+  claude -p --model ${argument} --permission-mode bypassPermissions "$(cat "$brief")" < /dev/null
+)
+\`\`\`
+Report the model only when Claude process output verifies it. You may add --output-format json to inspect modelUsage metadata.
+Model self-description is not verification. If process metadata does not identify the model, report the model as unknown.`
   })
   return `${prompt}\n\nCook-it stage roles:\n${roles.join('\n')}`
 }

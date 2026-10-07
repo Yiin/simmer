@@ -90,8 +90,8 @@ test('missing config uses the design defaults', async () => {
     watchdogMinutes: 20,
     models: {
       claude: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' },
-      codex: {},
-      pi: {}
+      codex: { reviewer: 'claude:opus' },
+      pi: { reviewer: 'claude:opus' }
     }
   })
 })
@@ -149,7 +149,7 @@ test('partial nested config keeps only each harness defaults', async () => {
   expect(config.models).toEqual({
     claude: { planner: 'opus', implementer: 'custom', reviewer: 'opus', tester: 'opus' },
     codex: { reviewer: 'gpt-review' },
-    pi: { planner: 'pi-plan' }
+    pi: { planner: 'pi-plan', reviewer: 'claude:opus' }
   })
 })
 
@@ -157,8 +157,8 @@ test('empty harness maps preserve their own defaults', async () => {
   writeConfig({ models: { claude: {}, codex: {}, pi: {} } })
   expect((await loadConfig(directory)).models).toEqual({
     claude: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' },
-    codex: {},
-    pi: {}
+    codex: { reviewer: 'claude:opus' },
+    pi: { reviewer: 'claude:opus' }
   })
 })
 
@@ -166,9 +166,9 @@ test('changing the selected harness does not copy another harness models', async
   writeConfig({ harness: 'claude', models: { claude: { reviewer: 'custom' } } })
   const config = await loadConfig(directory)
   config.harness = 'codex'
-  expect(config.models[config.harness]).toEqual({})
+  expect(config.models[config.harness]).toEqual({ reviewer: 'claude:opus' })
   config.harness = 'pi'
-  expect(config.models[config.harness]).toEqual({})
+  expect(config.models[config.harness]).toEqual({ reviewer: 'claude:opus' })
   expect(config.models.claude.reviewer).toBe('custom')
 })
 
@@ -226,6 +226,42 @@ test.each(['claude', 'codex', 'pi'])('%s validates its role map', async (harness
       writeConfig({ models: { [harness]: { [role]: value } } })
       await expect(loadConfig(directory)).rejects.toThrow(
         `models.${harness}.${role} must be a non-empty string`
+      )
+    }
+  }
+})
+
+test.each(['codex', 'pi'])('%s accepts Claude processes for every role', async (harness) => {
+  for (const role of ['planner', 'implementer', 'reviewer', 'tester']) {
+    writeConfig({ models: { [harness]: { [role]: ' claude:sonnet ' } } })
+    expect((await loadConfig(directory)).models).toMatchObject({
+      [harness]: { [role]: 'claude:sonnet' }
+    })
+    for (const model of ['claude:', 'claude:   ', ' claude: \t']) {
+      writeConfig({ models: { [harness]: { [role]: model } } })
+      await expect(loadConfig(directory)).rejects.toThrow(
+        `models.${harness}.${role} must name a model after claude:`
+      )
+    }
+    for (const model of ['claude:op\nus', 'claude:op\tus', 'claude:op\0us']) {
+      writeConfig({ models: { [harness]: { [role]: model } } })
+      await expect(loadConfig(directory)).rejects.toThrow(
+        `models.${harness}.${role} must not contain control characters in the Claude model`
+      )
+    }
+    writeConfig({ models: { [harness]: { [role]: 'claude:--help' } } })
+    await expect(loadConfig(directory)).rejects.toThrow(
+      `models.${harness}.${role} must not start the Claude model with -`
+    )
+  }
+})
+
+test('Claude rejects Claude process prefixes for every role', async () => {
+  for (const role of ['planner', 'implementer', 'reviewer', 'tester']) {
+    for (const model of ['claude:opus', ' claude:opus ']) {
+      writeConfig({ models: { claude: { [role]: model } } })
+      await expect(loadConfig(directory)).rejects.toThrow(
+        `models.claude.${role} cannot use claude:<model>; use a plain Claude model name`
       )
     }
   }
