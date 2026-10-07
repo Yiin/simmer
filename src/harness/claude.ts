@@ -20,7 +20,12 @@ export function run(options: RunOptions) {
         const tokens = record(event.usage)
         return {
           finalMessage: typeof event.result === 'string' ? event.result : undefined,
-          usage: usage(tokens.input_tokens, tokens.output_tokens),
+          usage: usage(
+            tokens.input_tokens,
+            tokens.output_tokens,
+            tokens.cache_read_input_tokens,
+            tokens.cache_creation_input_tokens
+          ),
           usageKey: 'total'
         }
       }
@@ -29,7 +34,12 @@ export function run(options: RunOptions) {
       const tokens = record(message.usage)
       return {
         finalMessage: messageText(message.content),
-        usage: usage(tokens.input_tokens, tokens.output_tokens),
+        usage: usage(
+          tokens.input_tokens,
+          tokens.output_tokens,
+          tokens.cache_read_input_tokens,
+          tokens.cache_creation_input_tokens
+        ),
         usageKey: typeof message.id === 'string' ? message.id : undefined
       }
     }

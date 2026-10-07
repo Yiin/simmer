@@ -10,7 +10,7 @@ export function run(options: RunOptions) {
       const tokens = record(message.usage)
       return {
         finalMessage: messageText(message.content),
-        usage: usage(tokens.input, tokens.output)
+        usage: usage(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite)
       }
     }
   )

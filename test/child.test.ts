@@ -155,7 +155,7 @@ else {
   }
   const output = process.argv[2] === 'exec'
     ? [{ type: 'item.completed', item: { type: 'agent_message', text: 'Done' } },
-       { type: 'turn.completed', usage: { input_tokens: 7, output_tokens: 3 } }]
+       { type: 'turn.completed', usage: { input_tokens: 7, output_tokens: 3, cached_input_tokens: 5 } }]
     : [{ type: 'result', result: 'Done', usage: { input_tokens: 7, output_tokens: 3 } }]
   process.stdout.write(output.map(value => JSON.stringify(value)).join('\\n') + '\\n')
 }
@@ -272,7 +272,7 @@ test('lands the first attempt and records facts on the child and its actual pare
     models: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' },
     attempt: 1,
     durationMs: expect.any(Number),
-    usage: { inputTokens: 7, outputTokens: 3 },
+    usage: { inputTokens: 2, outputTokens: 3, cacheReadTokens: 5, cacheWriteTokens: 0 },
     harnessExit: 0,
     gateExit: 0,
     commitCount: 1,

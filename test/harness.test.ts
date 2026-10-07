@@ -115,13 +115,22 @@ test('Claude uses unattended flags, role agents, cwd, and empty stdin', async ()
           content: [{ type: 'text', text: 'Subagent text' }]
         }
       },
-      { type: 'result', result: 'Done now', usage: { input_tokens: 42, output_tokens: 7 } }
+      {
+        type: 'result',
+        result: 'Done now',
+        usage: {
+          input_tokens: 42,
+          output_tokens: 7,
+          cache_read_input_tokens: 9000,
+          cache_creation_input_tokens: 300
+        }
+      }
     ])
   )
   expect(await run('claude')).toEqual({
     exitCode: 0,
     finalMessage: 'Done now',
-    usage: { inputTokens: 42, outputTokens: 7 },
+    usage: { inputTokens: 42, outputTokens: 7, cacheReadTokens: 9000, cacheWriteTokens: 300 },
     killedByWatchdog: false
   })
   const called = invocation()
@@ -189,7 +198,7 @@ test('Codex parses completed items and usage with workspace and network flags', 
   expect(await run('codex')).toEqual({
     exitCode: 0,
     finalMessage: 'Final Codex',
-    usage: { inputTokens: 100, outputTokens: 12 },
+    usage: { inputTokens: 20, outputTokens: 12, cacheReadTokens: 80, cacheWriteTokens: 0 },
     killedByWatchdog: false
   })
   expect(invocation()).toEqual({
@@ -213,7 +222,7 @@ test('Pi uses its configured binary and totals completed assistant usage only', 
             { type: 'text', text: 'Earlier' },
             { type: 'toolCall', name: 'bash' }
           ],
-          usage: { input: 50, output: 4 }
+          usage: { input: 50, output: 4, cacheRead: 500, cacheWrite: 40 }
         }
       },
       {
@@ -225,7 +234,7 @@ test('Pi uses its configured binary and totals completed assistant usage only', 
         message: {
           role: 'assistant',
           content: [{ type: 'text', text: 'Final Pi' }],
-          usage: { input: 60, output: 6 }
+          usage: { input: 60, output: 6, cacheRead: 600, cacheWrite: 0 }
         }
       },
       { type: 'turn_end', message: { role: 'assistant', usage: { input: 60, output: 6 } } },
@@ -236,7 +245,7 @@ test('Pi uses its configured binary and totals completed assistant usage only', 
   expect(await run('pi', 1, binary)).toEqual({
     exitCode: 0,
     finalMessage: 'Final Pi',
-    usage: { inputTokens: 110, outputTokens: 10 },
+    usage: { inputTokens: 110, outputTokens: 10, cacheReadTokens: 1100, cacheWriteTokens: 40 },
     killedByWatchdog: false
   })
   expect(invocation()).toEqual({
@@ -281,7 +290,7 @@ test.each(harnesses)('%s keeps its final text and usage on nonzero exit', async 
   expect(await run(harness)).toEqual({
     exitCode: 9,
     finalMessage: 'Failed after work',
-    usage: { inputTokens: 25, outputTokens: 5 },
+    usage: { inputTokens: 25, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
     killedByWatchdog: false
   })
 })
@@ -472,7 +481,12 @@ test('Claude falls back to assistant text and deduplicates usage by message id',
         message: {
           id: 'same',
           content: [{ type: 'text', text: 'Complete' }],
-          usage: { input_tokens: 10, output_tokens: 4 }
+          usage: {
+            input_tokens: 10,
+            output_tokens: 4,
+            cache_read_input_tokens: 2000,
+            cache_creation_input_tokens: 150
+          }
         }
       },
       {
@@ -489,7 +503,7 @@ test('Claude falls back to assistant text and deduplicates usage by message id',
   expect(await run('claude')).toEqual({
     exitCode: 0,
     finalMessage: 'Complete',
-    usage: { inputTokens: 10, outputTokens: 4 },
+    usage: { inputTokens: 10, outputTokens: 4, cacheReadTokens: 2000, cacheWriteTokens: 150 },
     killedByWatchdog: false
   })
 })
@@ -525,5 +539,21 @@ test('invalid usage stays undefined while reported zero usage stays zero', async
   )
   expect((await run('codex')).usage).toBeUndefined()
   fake('codex', events([{ type: 'turn.completed', usage: { input_tokens: 0, output_tokens: 0 } }]))
-  expect((await run('codex')).usage).toEqual({ inputTokens: 0, outputTokens: 0 })
+  expect((await run('codex')).usage).toEqual({
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0
+  })
+  fake(
+    'claude',
+    events([
+      {
+        type: 'result',
+        result: 'Done',
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: '9' }
+      }
+    ])
+  )
+  expect((await run('claude')).usage).toBeUndefined()
 })

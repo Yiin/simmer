@@ -18,7 +18,13 @@ export function run(options: RunOptions) {
     (event) => {
       if (event.type === 'turn.completed') {
         const tokens = record(event.usage)
-        return { usage: usage(tokens.input_tokens, tokens.output_tokens), usageKey: 'total' }
+        const cached = tokens.cached_input_tokens ?? 0
+        // Codex counts cached input inside input_tokens; Usage.inputTokens is uncached only.
+        const uncached =
+          typeof tokens.input_tokens === 'number' && typeof cached === 'number'
+            ? tokens.input_tokens - cached
+            : tokens.input_tokens
+        return { usage: usage(uncached, tokens.output_tokens, cached), usageKey: 'total' }
       }
       const item = record(event.item)
       return event.type === 'item.completed' &&

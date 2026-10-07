@@ -4,9 +4,12 @@ import { readdir, readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import type { Config } from '../config'
 
+// inputTokens counts only uncached input. Cache fields are 0 when a stream does not report them.
 export type Usage = {
   inputTokens: number
   outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
 }
 export type HarnessResult = {
   exitCode: number
@@ -40,18 +43,34 @@ export function record(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {}
 }
 
-export function usage(inputTokens: unknown, outputTokens: unknown): Usage | undefined {
+function tokenCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+export function usage(
+  inputTokens: unknown,
+  outputTokens: unknown,
+  cacheReadTokens?: unknown,
+  cacheWriteTokens?: unknown
+): Usage | undefined {
+  const input = tokenCount(inputTokens)
+  const output = tokenCount(outputTokens)
+  const cacheRead = tokenCount(cacheReadTokens ?? 0)
+  const cacheWrite = tokenCount(cacheWriteTokens ?? 0)
   if (
-    typeof inputTokens === 'number' &&
-    typeof outputTokens === 'number' &&
-    Number.isFinite(inputTokens) &&
-    Number.isFinite(outputTokens) &&
-    inputTokens >= 0 &&
-    outputTokens >= 0
+    input === undefined ||
+    output === undefined ||
+    cacheRead === undefined ||
+    cacheWrite === undefined
   ) {
-    return { inputTokens, outputTokens }
+    return undefined
   }
-  return undefined
+  return {
+    inputTokens: input,
+    outputTokens: output,
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: cacheWrite
+  }
 }
 
 export function messageText(content: unknown): string | undefined {
@@ -242,9 +261,11 @@ export async function runProcess(
         ? totals.reduce(
             (total, value) => ({
               inputTokens: total.inputTokens + value.inputTokens,
-              outputTokens: total.outputTokens + value.outputTokens
+              outputTokens: total.outputTokens + value.outputTokens,
+              cacheReadTokens: total.cacheReadTokens + value.cacheReadTokens,
+              cacheWriteTokens: total.cacheWriteTokens + value.cacheWriteTokens
             }),
-            { inputTokens: 0, outputTokens: 0 }
+            { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
           )
         : undefined,
       killedByWatchdog
