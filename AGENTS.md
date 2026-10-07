@@ -1,5 +1,10 @@
 # Agent Instructions
 
+## Quality gate
+
+Install dependencies with `bun install`. Run `bun run gate` before handing off changes.
+The gate runs `bun run typecheck`, `bun run lint`, and `bun run test`.
+
 This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
 
 > **Architecture in one line:** Issues live in a local Dolt database

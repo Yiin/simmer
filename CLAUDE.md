@@ -60,13 +60,8 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
-```bash
-# Example:
-# npm install
-# npm test
-```
+Install dependencies with `bun install`. Run `bun run gate` before handing off changes.
+The gate runs `bun run typecheck`, `bun run lint`, and `bun run test`.
 
 ## Architecture Overview
 
