@@ -9,6 +9,7 @@ export type Issue = {
   labels: string[]
   comments: { id: string; text: string }[]
   parent?: string
+  leaseExpiresAt?: string
 }
 
 export type ClaimResult = { kind: 'claimed' } | { kind: 'lost' }
@@ -63,7 +64,8 @@ function issue(value: unknown): Issue {
       }
       return { id, text }
     }),
-    ...(text('parent') ? { parent: identifier(text('parent')) } : {})
+    ...(text('parent') ? { parent: identifier(text('parent')) } : {}),
+    ...(text('lease_expires_at') ? { leaseExpiresAt: text('lease_expires_at') } : {})
   }
 }
 
@@ -85,33 +87,63 @@ function identifier(value: string): string {
   return value
 }
 
+// Only a simmer worker's actor (`<name>-<uuid>`, see child.ts) is safe to clear; a person who
+// assigned a child to themselves keeps it.
+const simmerActor = /-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
 export class Bd {
   private readonly cwd: string
   private readonly actor: string
+  private readonly timeoutMs: number
+  private readonly signal?: AbortSignal
 
-  constructor(options: { cwd: string; actor: string }) {
+  constructor(options: { cwd: string; actor: string; timeoutMs?: number; signal?: AbortSignal }) {
     if (options.actor.trim() === '') throw new Error('bd actor must be a non-empty string')
     this.cwd = options.cwd
     this.actor = options.actor
+    this.timeoutMs = options.timeoutMs ?? 60_000
+    this.signal = options.signal
   }
 
   private async run(commandArguments: string[], input = ''): Promise<string> {
+    this.signal?.throwIfAborted()
     const child = Bun.spawn(['bd', ...commandArguments, '--json', '--actor', this.actor], {
       cwd: this.cwd,
+      detached: true,
       env: process.env,
       stdin: new TextEncoder().encode(input),
       stdout: 'pipe',
       stderr: 'pipe'
     })
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited
-    ])
-    if (exitCode !== 0) {
-      throw new BdError(commandArguments[0] ?? '', exitCode, stderr || stdout)
+    let timedOut = false
+    function kill() {
+      try {
+        process.kill(-child.pid, 'SIGKILL')
+      } catch (error) {
+        if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
+      }
     }
-    return stdout
+    const timer = setTimeout(() => {
+      timedOut = true
+      kill()
+    }, this.timeoutMs)
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited
+      ])
+      this.signal?.throwIfAborted()
+      if (timedOut) {
+        throw new BdError(commandArguments[0] ?? '', 124, `timed out after ${this.timeoutMs}ms`)
+      }
+      if (exitCode !== 0) {
+        throw new BdError(commandArguments[0] ?? '', exitCode, stderr || stdout)
+      }
+      return stdout
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   async children(epic: string): Promise<Issue[]> {
@@ -144,7 +176,7 @@ export class Bd {
       // bd 1.3.1 reports a claim held by another actor as exit 1, not the exit 13 of a guard.
       if (
         error instanceof BdError &&
-        (error.exitCode === 13 || /already claimed by/.test(error.message))
+        (error.exitCode === 13 || /already (?:claimed by|assigned to)/.test(error.message))
       ) {
         return { kind: 'lost' }
       }
@@ -159,7 +191,7 @@ export class Bd {
 
   async reopen(id: string, reason: string, resume = true): Promise<void> {
     await this.run(['reopen', identifier(id), '--reason', reason])
-    if (resume) await this.run(['update', identifier(id), '--status', 'in_progress'])
+    if (resume) await this.run(['update', identifier(id), '--claim'])
   }
 
   async block(id: string): Promise<void> {
@@ -179,13 +211,75 @@ export class Bd {
     await this.run(['unclaim', identifier(id), '--if-assignee', this.actor])
   }
 
+  async recoverClosed(id: string, assignee: string): Promise<void> {
+    await this.run([
+      'update',
+      identifier(id),
+      '--status',
+      'open',
+      '--assignee',
+      '',
+      '--if-status',
+      'closed',
+      '--if-assignee',
+      assignee
+    ])
+  }
+
   async note(id: string, text: string): Promise<void> {
     await this.run(['note', identifier(id), '--stdin'], text)
   }
 
   async reclaimExpired(epic: string): Promise<void> {
     const children = await this.children(epic)
-    const ids = children.filter((child) => child.status === 'in_progress').map((child) => child.id)
+    for (const child of children) {
+      if (
+        child.status === 'open' &&
+        simmerActor.test(child.assignee) &&
+        !(Date.parse(child.leaseExpiresAt ?? '') > Date.now())
+      ) {
+        try {
+          await this.run([
+            'update',
+            identifier(child.id),
+            '--assignee',
+            '',
+            '--if-status',
+            'open',
+            '--if-assignee',
+            child.assignee
+          ])
+        } catch (error) {
+          if (!(error instanceof BdError) || error.exitCode !== 13) throw error
+        }
+        continue
+      }
+      if (
+        child.status !== 'in_progress' ||
+        child.leaseExpiresAt ||
+        (child.assignee !== '' && child.assignee !== this.actor)
+      )
+        continue
+      try {
+        await this.run([
+          'update',
+          identifier(child.id),
+          '--status',
+          'open',
+          '--assignee',
+          '',
+          '--if-status',
+          'in_progress',
+          '--if-assignee',
+          child.assignee
+        ])
+      } catch (error) {
+        if (!(error instanceof BdError) || error.exitCode !== 13) throw error
+      }
+    }
+    const ids = children
+      .filter((child) => child.status === 'in_progress' && child.leaseExpiresAt)
+      .map((child) => child.id)
     if (ids.length === 0) return
     await this.run(['reclaim', '--id', ids.map(identifier).join(','), '--older-than', '0s'])
   }

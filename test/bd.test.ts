@@ -161,6 +161,15 @@ test('claim returns lost when another actor already holds the child', async () =
   expect(await adapter.claim('epic-1.2')).toEqual({ kind: 'lost' })
 })
 
+test('claim returns lost for an open child already assigned to another actor', async () => {
+  respond({
+    arguments: ['update', 'epic-1.2', '--claim'],
+    exitCode: 1,
+    stderr: 'Error updating epic-1.2: issue already assigned to dead-worker\n'
+  })
+  expect(await adapter.claim('epic-1.2')).toEqual({ kind: 'lost' })
+})
+
 test('claim throws ordinary failures', async () => {
   respond({
     arguments: ['update', 'epic-1.2', '--claim'],
@@ -177,10 +186,10 @@ test('claim returns lost for a stale guard exit', async () => {
   expect(await adapter.claim('epic-1.2')).toEqual({ kind: 'lost' })
 })
 
-test('reopen clears closure before setting in-progress', async () => {
+test('reopen takes a new claim lease after clearing closure', async () => {
   respond(
     { arguments: ['reopen', 'epic-1.2', '--reason', 'red gate'] },
-    { arguments: ['update', 'epic-1.2', '--status', 'in_progress'] }
+    { arguments: ['update', 'epic-1.2', '--claim'] }
   )
   expect(await adapter.reopen('epic-1.2', 'red gate')).toBeUndefined()
 })
@@ -199,6 +208,24 @@ test('block releases the claim and sets blocked in one guarded write', async () 
     ]
   })
   expect(await adapter.block('epic-1.2')).toBeUndefined()
+})
+
+test('recovering closed crash work guards its status and previous owner', async () => {
+  respond({
+    arguments: [
+      'update',
+      'epic-1.2',
+      '--status',
+      'open',
+      '--assignee',
+      '',
+      '--if-status',
+      'closed',
+      '--if-assignee',
+      'dead-worker'
+    ]
+  })
+  expect(await adapter.recoverClosed('epic-1.2', 'dead-worker')).toBeUndefined()
 })
 
 test('heartbeat renews the same issue each time the worker calls it', async () => {
@@ -280,8 +307,8 @@ test('reclaimExpired only reclaims in-progress children of the requested epic', 
       arguments: ['list', '--parent', 'epic-1', '--all', '--limit', '0'],
       stdout: `[
         {"id":"epic-1.1","title":"Done","status":"closed"},
-        {"id":"epic-1.2","title":"Running","status":"in_progress"},
-        {"id":"epic-1.3","title":"Running too","status":"in_progress"},
+        {"id":"epic-1.2","title":"Running","status":"in_progress","lease_expires_at":"2999-01-01T00:00:00Z"},
+        {"id":"epic-1.3","title":"Running too","status":"in_progress","lease_expires_at":"2000-01-01T00:00:00Z"},
         {"id":"epic-1.4","title":"Open","status":"open"}
       ]`
     },
@@ -297,6 +324,68 @@ test('reclaimExpired never runs a global reclaim when the epic has no running ch
   respond({ arguments: ['list', '--parent', 'epic-1', '--all', '--limit', '0'], stdout: '[]' })
   expect(await adapter.reclaimExpired('epic-1')).toBeUndefined()
 })
+
+test.each([0, 13])(
+  'recovery clears stale open simmer assignees, but not a person, and skips a guard exit %j',
+  async (exitCode) => {
+    respond(
+      {
+        arguments: ['list', '--parent', 'epic-1', '--all', '--limit', '0'],
+        stdout: JSON.stringify([
+          {
+            id: 'epic-1.1',
+            title: 'Stuck',
+            status: 'open',
+            assignee: 'yiin-00000000-0000-4000-8000-000000000001'
+          },
+          { id: 'epic-1.6', title: 'Mine', status: 'open', assignee: 'alice' },
+          {
+            id: 'epic-1.2',
+            title: 'Expired',
+            status: 'open',
+            assignee: 'yiin-00000000-0000-4000-8000-000000000002',
+            lease_expires_at: '2000-01-01T00:00:00Z'
+          },
+          {
+            id: 'epic-1.3',
+            title: 'Live',
+            status: 'open',
+            assignee: 'live-worker',
+            lease_expires_at: '2999-01-01T00:00:00Z'
+          },
+          { id: 'epic-1.4', title: 'Ready', status: 'open', assignee: '' },
+          { id: 'epic-1.5', title: 'Done', status: 'closed', assignee: 'dead-worker' }
+        ])
+      },
+      {
+        arguments: [
+          'update',
+          'epic-1.1',
+          '--assignee',
+          '',
+          '--if-status',
+          'open',
+          '--if-assignee',
+          'yiin-00000000-0000-4000-8000-000000000001'
+        ],
+        exitCode
+      },
+      {
+        arguments: [
+          'update',
+          'epic-1.2',
+          '--assignee',
+          '',
+          '--if-status',
+          'open',
+          '--if-assignee',
+          'yiin-00000000-0000-4000-8000-000000000002'
+        ]
+      }
+    )
+    await adapter.reclaimExpired('epic-1')
+  }
+)
 
 test.each([
   { output: '{', message: 'expected an issue array' },
@@ -358,3 +447,54 @@ test.each(['database lock held by server', 'already claimed lease backend unavai
     await expect(adapter.claim('epic-1.2')).rejects.toThrow(message)
   }
 )
+
+test.each(['', 'worker 7'])(
+  'reclaimExpired recovers a child without a lease owned by %j',
+  async (assignee) => {
+    respond(
+      {
+        arguments: ['list', '--parent', 'epic-1', '--all', '--limit', '0'],
+        stdout: JSON.stringify([
+          { id: 'epic-1.2', title: 'Stuck', status: 'in_progress', assignee },
+          { id: 'epic-1.3', title: 'Foreign', status: 'in_progress', assignee: 'worker 8' }
+        ])
+      },
+      {
+        arguments: [
+          'update',
+          'epic-1.2',
+          '--status',
+          'open',
+          '--assignee',
+          '',
+          '--if-status',
+          'in_progress',
+          '--if-assignee',
+          assignee
+        ]
+      }
+    )
+    await adapter.reclaimExpired('epic-1')
+  }
+)
+
+test('every bd call times out, kills bd, and reports a BdError', async () => {
+  writeFileSync(
+    join(directory, 'bd'),
+    `#!${process.execPath}
+await Bun.write('bd.pid', String(process.pid))
+Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)'],
+  { stdout: 'inherit', stderr: 'inherit' })
+setInterval(() => {}, 1000)
+`,
+    { mode: 0o755 }
+  )
+  const timed = new Bd({ cwd: directory, actor: 'worker 7', timeoutMs: 100 })
+  const failure = await timed.show('epic-1.2').catch((error: unknown) => error)
+  expect(failure).toBeInstanceOf(BdError)
+  if (!(failure instanceof BdError)) throw failure
+  expect(failure.exitCode).toBe(124)
+  expect(failure.message).toBe('bd show failed (exit 124): timed out after 100ms')
+  const processId = Number(readFileSync(join(directory, 'bd.pid'), 'utf8'))
+  expect(() => process.kill(processId, 0)).toThrow()
+})

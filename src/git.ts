@@ -31,6 +31,82 @@ export class GitError extends Error {
 export class Git {
   constructor(private readonly options: { cwd: string; base: string }) {}
 
+  async temporaryDirectory(): Promise<string> {
+    const directory = (
+      await this.run(['rev-parse', '--path-format=absolute', '--git-common-dir'])
+    ).trim()
+    const temporaryDirectory = join(directory, 'simmer-tmp')
+    mkdirSync(temporaryDirectory, { recursive: true })
+    return temporaryDirectory
+  }
+
+  async recoverWorktree(epic: string, branch: string, start = ''): Promise<Worktree> {
+    await this.run(['check-ref-format', '--branch', branch])
+    let checkout = await this.branchWorktree(branch)
+    if (checkout?.busy) throw new Error('Child worktree is busy')
+    const temporaryDirectory = await this.temporaryDirectory()
+    if (!checkout && (await this.run(['branch', '--list', branch])).trim() !== '') {
+      const path = mkdtempSync(join(temporaryDirectory, 'child-'))
+      await this.run(['worktree', 'add', '--', path, branch])
+      checkout = { path, busy: false }
+    }
+    return {
+      path: checkout?.path ?? this.options.cwd,
+      branch,
+      runBranch: `simmer/${epic}`,
+      start,
+      owned: checkout?.path.startsWith(`${temporaryDirectory}/child-`) ?? false
+    }
+  }
+
+  async branchTip(branch: string): Promise<string | undefined> {
+    await this.run(['check-ref-format', '--branch', branch])
+    try {
+      return (await this.run(['rev-parse', '--verify', `refs/heads/${branch}`])).trim()
+    } catch (error) {
+      if (!(error instanceof GitError) || error.exitCode !== 128) throw error
+      return undefined
+    }
+  }
+
+  async isIntegrated(epic: string, commit: string): Promise<boolean> {
+    for (const branch of [`simmer/${epic}`, this.options.base]) {
+      const tip = await this.branchTip(branch)
+      if (!tip) continue
+      try {
+        await this.run(['merge-base', '--is-ancestor', commit, tip])
+        return true
+      } catch (error) {
+        if (!(error instanceof GitError) || error.exitCode !== 1) throw error
+      }
+    }
+    return false
+  }
+
+  async landRun(epic: string, push = false): Promise<LandingResult> {
+    const runBranch = `simmer/${epic}`
+    if (!(await this.branchTip(runBranch))) return { kind: 'landed' }
+    return this.land(
+      {
+        path: this.options.cwd,
+        branch: runBranch,
+        runBranch,
+        start: '',
+        owned: false
+      },
+      push
+    )
+  }
+
+  async retryLanding(epic: string, branch: string, push = false): Promise<LandingResult> {
+    const worktree = await this.recoverWorktree(epic, branch)
+    if (worktree.path !== this.options.cwd) {
+      const integrated = await this.integrate(worktree)
+      if (integrated.kind !== 'landed') return integrated
+    }
+    return this.land(worktree, push)
+  }
+
   private async run(commandArguments: string[], cwd = this.options.cwd): Promise<string> {
     const child = Bun.spawn(
       ['git', '-c', 'rebase.autoStash=false', '-c', 'merge.autoStash=false', ...commandArguments],

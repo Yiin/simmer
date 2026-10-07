@@ -53,24 +53,52 @@ try {
     ) {
       throw new Error('--harness must be claude, codex, or pi')
     }
-    const config = await loadConfig()
-    if (values.harness !== undefined) config.harness = values.harness
-    if (command === 'child') {
-      const { runChild } = await import('./child')
-      const result = await runChild({
-        id: target,
-        cwd: process.cwd(),
-        config,
-        worktree: values.worktree,
-        noLand: values['no-land'],
-        json: values.json
-      })
-      process.exitCode = result.exitCode
+    if (command === 'status') {
+      const { printStatus } = await import('./status')
+      await printStatus({ epic: target, cwd: process.cwd(), json: values.json })
     } else {
-      throw new Error(`simmer ${command} is not implemented yet`)
+      const controller = new AbortController()
+      function interrupt(signal: NodeJS.Signals) {
+        const error = new Error(`Interrupted by ${signal}`)
+        controller.abort(error)
+        process.exitCode = signal === 'SIGINT' ? 130 : 143
+      }
+      const onInterrupt = () => interrupt('SIGINT')
+      const onTerminate = () => interrupt('SIGTERM')
+      process.on('SIGINT', onInterrupt)
+      process.on('SIGTERM', onTerminate)
+      try {
+        const config = await loadConfig()
+        if (values.harness !== undefined) config.harness = values.harness
+        if (command === 'child') {
+          const { runChild } = await import('./child')
+          const result = await runChild({
+            id: target,
+            cwd: process.cwd(),
+            config,
+            worktree: values.worktree,
+            noLand: values['no-land'],
+            json: values.json,
+            signal: controller.signal
+          })
+          process.exitCode = result.exitCode
+        } else if (command === 'run') {
+          const { runEpic } = await import('./run')
+          process.exitCode = await runEpic({
+            epic: target,
+            cwd: process.cwd(),
+            config,
+            json: values.json,
+            signal: controller.signal
+          })
+        }
+      } finally {
+        process.off('SIGINT', onInterrupt)
+        process.off('SIGTERM', onTerminate)
+      }
     }
   }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-  process.exitCode = 1
+  if (process.exitCode !== 130 && process.exitCode !== 143) process.exitCode = 1
 }

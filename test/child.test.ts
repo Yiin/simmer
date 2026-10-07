@@ -555,8 +555,15 @@ const argumentsList = process.argv.slice(2)
 const closed = JSON.parse(readFileSync(${JSON.stringify(join(directory, 'state.json'))},
   'utf8')).status === 'closed'
 const stage = ${JSON.stringify(stage)}
+let integrationCheck = false
+if (closed && stage === 'integrate' && argumentsList[4] === 'symbolic-ref') {
+  const counterPath = ${JSON.stringify(join(directory, 'integration-checks'))}
+  const previous = Number(await Bun.file(counterPath).text().catch(() => '0'))
+  writeFileSync(counterPath, String(previous + 1))
+  integrationCheck = previous > 0
+}
 if (closed && ((stage.startsWith('newCommits') && argumentsList[4] === 'rev-list') ||
-    (stage === 'integrate' && argumentsList[4] === 'symbolic-ref') ||
+    integrationCheck ||
     (stage === 'merge' && argumentsList[4] === 'merge') ||
     (stage === 'push' && argumentsList[4] === 'push') ||
     (stage === 'land' && argumentsList[4] === 'merge-base' &&
@@ -576,14 +583,16 @@ process.exit(result.exitCode)
 `
     )
     const result = run()
-    if (stage === 'land' || stage === 'merge' || stage === 'push') {
+    if (stage === 'integrate' || stage === 'land' || stage === 'merge' || stage === 'push') {
       expect(result.exitCode).toBe(0)
       expect(result.stderr).toBe('')
       expect(state().status).toBe('closed')
       expect(calls('reopen')).toHaveLength(0)
       expect(calls('unclaim')).toHaveLength(0)
       expect(calls('update')).toHaveLength(1)
-      expect(git(['show', 'simmer/parent-9:child.txt'])).toBe('green\n1')
+      if (stage !== 'integrate') {
+        expect(git(['show', 'simmer/parent-9:child.txt'])).toBe('green\n1')
+      }
       const deferred = result.events.find((event) => event.event === 'deferred')
       expect(deferred?.reason).toContain('injected Git failure')
       expect(result.events.at(-1)).toEqual({
@@ -594,7 +603,7 @@ process.exit(result.exitCode)
       const note = calls('note').at(-1)
       expect(Array.isArray(note?.arguments) && note.arguments[1]).toBe('parent-9')
       if (typeof note?.input !== 'string') throw new Error('Missing landing note')
-      expect(JSON.parse(note.input)).toEqual({
+      expect(JSON.parse(note.input.split('\n')[0] ?? '')).toEqual({
         id: 'task-1.1',
         branch: expect.any(String),
         kind: 'deferred',
@@ -645,7 +654,7 @@ test('a base conflict after integration defers landing and keeps the bead closed
   const note = calls('note').at(-1)
   expect(Array.isArray(note?.arguments) && note.arguments[1]).toBe('parent-9')
   if (typeof note?.input !== 'string') throw new Error('Missing landing note')
-  expect(JSON.parse(note.input)).toEqual({
+  expect(JSON.parse(note.input.split('\n')[0] ?? '')).toEqual({
     id: 'task-1.1',
     branch: 'assigned',
     kind: 'deferred',

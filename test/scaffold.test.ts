@@ -126,17 +126,6 @@ test('partial nested config keeps unspecified defaults', async () => {
 })
 
 test.each([
-  ['run', 'epic'],
-  ['status', 'epic']
-])('%s reports its stub without claiming success', (command, target) => {
-  expect(run([command, target])).toEqual({
-    exitCode: 1,
-    stdout: '',
-    stderr: `simmer ${command} is not implemented yet\n`
-  })
-})
-
-test.each([
   { config: { base: '' }, message: 'base must be a non-empty string' },
   { config: { base: null }, message: 'base must be a non-empty string' },
   { config: { gate: ' ' }, message: 'gate must be a non-empty string' },
