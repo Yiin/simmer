@@ -301,15 +301,16 @@ test.each(['epic-1.2', 'epic-1'])('note appends exact text to %s through stdin',
   ).toBeUndefined()
 })
 
-test('reclaimExpired only reclaims in-progress children of the requested epic', async () => {
+test('reclaimExpired only reclaims in-progress simmer children of the requested epic', async () => {
   respond(
     {
       arguments: ['list', '--parent', 'epic-1', '--all', '--limit', '0'],
       stdout: `[
         {"id":"epic-1.1","title":"Done","status":"closed"},
-        {"id":"epic-1.2","title":"Running","status":"in_progress","lease_expires_at":"2999-01-01T00:00:00Z"},
-        {"id":"epic-1.3","title":"Running too","status":"in_progress","lease_expires_at":"2000-01-01T00:00:00Z"},
-        {"id":"epic-1.4","title":"Open","status":"open"}
+        {"id":"epic-1.2","title":"Running","status":"in_progress","assignee":"yiin-00000000-0000-4000-8000-000000000003","lease_expires_at":"2999-01-01T00:00:00Z"},
+        {"id":"epic-1.3","title":"Running too","status":"in_progress","assignee":"yiin-00000000-0000-4000-8000-000000000004","lease_expires_at":"2000-01-01T00:00:00Z"},
+        {"id":"epic-1.4","title":"Open","status":"open"},
+        {"id":"epic-1.5","title":"A person's claim","status":"in_progress","assignee":"Yiin","lease_expires_at":"2000-01-01T00:00:00Z"}
       ]`
     },
     {

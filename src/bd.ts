@@ -87,8 +87,8 @@ function identifier(value: string): string {
   return value
 }
 
-// Only a simmer worker's actor (`<name>-<uuid>`, see child.ts) is safe to clear; a person who
-// assigned a child to themselves keeps it.
+// Only a simmer worker's actor (`<name>-<uuid>`, see child.ts) is safe to clear or reclaim. A
+// person's claim has a lease too, but nobody heartbeats it, so it expires while they still work.
 const simmerActor = /-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export class Bd {
@@ -278,7 +278,10 @@ export class Bd {
       }
     }
     const ids = children
-      .filter((child) => child.status === 'in_progress' && child.leaseExpiresAt)
+      .filter(
+        (child) =>
+          child.status === 'in_progress' && child.leaseExpiresAt && simmerActor.test(child.assignee)
+      )
       .map((child) => child.id)
     if (ids.length === 0) return
     await this.run(['reclaim', '--id', ids.map(identifier).join(','), '--older-than', '0s'])
