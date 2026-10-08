@@ -41,3 +41,9 @@ PASS verified exit 0, exact hello.txt on main, and a closed child. The smoke com
 The fixed gate passed: frozen install, typecheck, lint, and 307 tests with zero failures. No changes were needed in process.ts or config.ts. The extra Claude smoke condition does not apply.
 
 Review folder: /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e136/scratchpad/HX1-review/. No follow-up bead is needed. No coordinator decision is needed.
+
+2026-10-08T04:05:33.001361+00:00 The post-rebase gate hit the known pipeline test timeout during concurrent lane gates.
+
+The unchanged test three claims lost during the pipeline do not trigger the fatal error limit took 9537.19 ms against its 5000 ms limit. All other tests passed. The two earlier gates passed the same test. Three bun test processes overlapped. The gate will run again after the other suites finish. No timeout or behavior change is needed.
+
+HX2 merged Gemini at 09f9892 while the gate ran. Rebase will keep both harness entries and README rows.
