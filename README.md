@@ -99,10 +99,10 @@ Each adapter returns the exit status, the final message, and token usage.
 ## Install
 
 ```
-bash scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/Yiin/simmer/main/scripts/install.sh | bash
 ```
 
-It clones or updates `~/Projects/simmer`, installs dependencies, writes the `~/.local/bin/simmer` shim, and points the `cook-it` and `cook-epic` skills in `~/.agents/skills` and `~/.claude/skills` at this repo. Run it again to update. To install on another machine: `ssh <host> 'bash -s' < scripts/install.sh`.
+From a clone, `bash scripts/install.sh` does the same. It clones or updates `~/Projects/simmer`, installs dependencies, writes the `~/.local/bin/simmer` shim, and points the `cook-it` and `cook-epic` skills in `~/.agents/skills` and `~/.claude/skills` at this repo. Run it again to update. To install on another machine: `ssh <host> 'bash -s' < scripts/install.sh`.
 
 ## Requirements
 
