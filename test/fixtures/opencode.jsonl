@@ -1,0 +1,9 @@
+{"type":"step_start","sessionID":"ses_1","part":{"id":"prt_2","messageID":"msg_3","sessionID":"ses_1","type":"step-start"}}
+{"type":"tool_use","sessionID":"ses_1","part":{"type":"tool","tool":"write","callID":"call_4","state":{"status":"completed","input":{"filePath":"/workspace/hello.txt","content":"opencode probe ok\n"},"output":"Wrote file successfully.","title":"tmp/HX1-probe/hello.txt"},"id":"prt_5","sessionID":"ses_1","messageID":"msg_3"}}
+{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_6","reason":"tool-calls","messageID":"msg_3","sessionID":"ses_1","type":"step-finish","tokens":{"total":23682,"input":21702,"output":68,"reasoning":120,"cache":{"write":0,"read":1792}},"cost":0.006746952}}
+{"type":"step_start","sessionID":"ses_1","part":{"id":"prt_7","messageID":"msg_8","sessionID":"ses_1","type":"step-start"}}
+{"type":"tool_use","sessionID":"ses_1","part":{"type":"tool","tool":"bash","callID":"call_9","state":{"status":"completed","input":{"command":"cat hello.txt","workdir":"/workspace"},"output":"opencode probe ok\n","title":"cat hello.txt"},"id":"prt_10","sessionID":"ses_1","messageID":"msg_8"}}
+{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_11","reason":"tool-calls","messageID":"msg_8","sessionID":"ses_1","type":"step-finish","tokens":{"total":23760,"input":145,"output":63,"reasoning":0,"cache":{"write":0,"read":23552}},"cost":0.000260412}}
+{"type":"step_start","sessionID":"ses_1","part":{"id":"prt_12","messageID":"msg_13","sessionID":"ses_1","type":"step-start"}}
+{"type":"text","sessionID":"ses_1","part":{"id":"prt_14","messageID":"msg_13","sessionID":"ses_1","type":"text","text":"probe complete"}}
+{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_15","reason":"stop","messageID":"msg_13","sessionID":"ses_1","type":"step-finish","tokens":{"total":23781,"input":96,"output":5,"reasoning":0,"cache":{"write":0,"read":23680}},"cost":0.00017688}}
