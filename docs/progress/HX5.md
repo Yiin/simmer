@@ -33,3 +33,9 @@ Provider setup used ANTHROPIC_API_KEY from get-token inside the same shell call.
 Source confirms embedded non-interactive runs auto-approve all session permissions. `--yolo` is root-only and cannot be used with `run`. Source: https://github.com/charmbracelet/crush/blob/v0.96.1/internal/app/app.go .
 
 Shared change required: runProcess currently accepts JSON lines only. Add an optional text output mode for Crush. Keep its watchdog, abort, exit handling, and JSON parsing. This requires one Claude smoke run.
+
+2026-10-08T04:07:24.289596+00:00 Adapter committed as 700f561. Added Crush registry entry, live text fixture, eight adapter tests, and README invocation. runProcess accepts `text` alongside its JSON parser. The existing JSON-harness test list now uses `satisfies Harness[]` so adding a registry entry does not widen its fixture keys. No config.ts change.
+
+Frozen install and gate PASS: typecheck, lint, 303 tests, zero failures, 110.76 s.
+
+Claude regression smoke PASS: 22.360 s, 224518 reported tokens. Crush smoke attempt 1 landed and closed its child in 23.981 s with usage null. The smoke command failed the exact byte comparison because hello.txt lacked a final newline. No adapter or smoke script change is needed. The second run adds a final-newline instruction through the temporary provider's system_prompt_prefix. Keep the exact smoke gate and byte check. The temporary provider selects Anthropic claude-haiku-4-5-20251001 for both large and small models, and stores workspace data outside the test repository.
