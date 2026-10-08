@@ -2,6 +2,7 @@ import type { RoleModels } from '../config'
 import { run as claude } from './claude'
 import { run as codex } from './codex'
 import { run as gemini } from './gemini'
+import { run as kimi } from './kimi'
 import { run as pi } from './pi'
 import type { HarnessResult, RunOptions } from './process'
 
@@ -19,7 +20,8 @@ export const harnessRegistry = {
   },
   codex: { defaultBinary: 'codex', run: codex, defaultModels: { reviewer: 'claude:opus' } },
   pi: { defaultBinary: 'pi', run: pi, defaultModels: { reviewer: 'claude:opus' } },
-  gemini: { defaultBinary: 'gemini', run: gemini, defaultModels: { reviewer: 'claude:opus' } }
+  gemini: { defaultBinary: 'gemini', run: gemini, defaultModels: { reviewer: 'claude:opus' } },
+  kimi: { defaultBinary: 'kimi', run: kimi, defaultModels: { reviewer: 'claude:opus' } }
 } satisfies Record<string, HarnessDefinition>
 
 export type Harness = keyof typeof harnessRegistry

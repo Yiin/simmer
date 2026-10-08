@@ -1,0 +1,6 @@
+{"role":"meta","type":"system.version","version":"2.0.0"}
+{"role":"assistant","tool_calls":[{"type":"function","id":"Write_0_2b51a3b7","function":{"name":"Write","arguments":"{\"path\":\"hello.txt\",\"content\":\"kimi probe ok\\n\"}"}}]}
+{"role":"tool","tool_call_id":"Write_0_2b51a3b7","content":"Wrote 14 bytes to hello.txt"}
+{"role":"assistant","tool_calls":[{"type":"function","id":"Bash_1_18770905_531fc923","function":{"name":"Bash","arguments":"{\"command\":\"cat hello.txt && od -c hello.txt | head -3\"}"}}]}
+{"role":"tool","tool_call_id":"Bash_1_18770905_531fc923","content":"kimi probe ok\n0000000   k   i   m   i       p   r   o   b   e       o   k  \\n\n0000016\n"}
+{"role":"assistant","content":"Created `hello.txt` with exactly `kimi probe ok` plus a trailing newline. `od -c` confirms 14 bytes ending in `\\n`.\n\nkimi probe done"}
