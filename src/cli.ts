@@ -2,6 +2,7 @@
 import { parseArgs } from 'node:util'
 import { version } from '../package.json'
 import { loadConfig } from './config'
+import { harnessChoices, harnessNames, isHarness } from './harness/registry'
 
 const help = `Usage: simmer <command> [options]
 
@@ -11,7 +12,7 @@ Commands:
   status <epic>              Show epic progress
 
 Options:
-  --harness claude|codex|pi   Select the worker harness
+  --harness ${harnessNames.join('|')}   Select the worker harness
   --json                     Print JSON events
   --worktree <path>           Use an existing worktree (child)
   --no-land                  Skip landing (child)
@@ -45,13 +46,8 @@ try {
     if (!target || positionals.length !== 2) {
       throw new Error(`Usage: simmer ${command} <${command === 'child' ? 'bead' : 'epic'}>`)
     }
-    if (
-      values.harness !== undefined &&
-      values.harness !== 'claude' &&
-      values.harness !== 'codex' &&
-      values.harness !== 'pi'
-    ) {
-      throw new Error('--harness must be claude, codex, or pi')
+    if (values.harness !== undefined && !isHarness(values.harness)) {
+      throw new Error(`--harness must be ${harnessChoices}`)
     }
     if (command === 'status') {
       const { printStatus } = await import('./status')

@@ -95,6 +95,25 @@ simmer validates the config shape and non-empty model names. A `claude:` suffix 
 | Pi | `pi -p --mode json` with stage instructions in the prompt |
 
 Each adapter returns the exit status, the final message, and token usage.
+`src/harness/registry.ts` defines each harness name, default binary, run function, and default role models.
+Config validation, config defaults, dispatch, and CLI help use this registry.
+
+### Add a harness
+
+1. Add `src/harness/<name>.ts` with `run(options: RunOptions)`. Use `runProcess` to read its event stream. Use `rolePrompt` for stage instructions when the CLI does not support Claude's role agents.
+2. Add one entry to `src/harness/registry.ts`. Set `defaultBinary`, `run`, and `defaultModels`. Use `{ reviewer: 'claude:opus' }` for the default reviewer on non-Claude harnesses.
+3. Add adapter tests in `test/harness.test.ts` or a new test file. Cover invocation, final text, usage, and failure handling.
+4. Add one row to the harness table above.
+5. Run `bun install --frozen-lockfile && bun run gate`.
+6. Run `scripts/smoke-harness.sh <name>` with the CLI installed and authenticated.
+
+The smoke command uses this checkout's `src/cli.ts`. It creates a temporary Git repo and an embedded Beads database.
+It gives one child a one-line file task and runs `simmer child` with a 20-minute timeout.
+PASS requires exit 0, the exact file contents on `main`, and a closed child.
+The command prints the CLI version, duration, and token usage from each attempt note.
+Token totals include uncached input, output, cache reads, and cache writes. Missing usage prints as unknown.
+It removes the temporary directory on PASS and keeps logs and the database on FAIL.
+It disables remote Beads routing for the run and never uses the shared Dolt server.
 
 ## Install
 

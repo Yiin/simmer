@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadConfig } from '../src/config'
+import { harnessChoices, harnessNames, harnessRegistry } from '../src/harness/registry'
 
 const projectRoot = join(import.meta.dir, '..')
 const cliPath = join(projectRoot, 'src/cli.ts')
@@ -41,7 +42,7 @@ Commands:
   status <epic>              Show epic progress
 
 Options:
-  --harness claude|codex|pi   Select the worker harness
+  --harness ${harnessNames.join('|')}   Select the worker harness
   --json                     Print JSON events
   --worktree <path>           Use an existing worktree (child)
   --no-land                  Skip landing (child)
@@ -53,7 +54,7 @@ Options:
 test('version reads package.json', () => {
   mkdirSync(join(directory, 'src'))
   cpSync(cliPath, join(directory, 'src/cli.ts'))
-  cpSync(join(projectRoot, 'src/config.ts'), join(directory, 'src/config.ts'))
+  cpSync(join(projectRoot, 'src'), join(directory, 'src'), { recursive: true })
   writeFileSync(join(directory, 'package.json'), '{"version":"9.8.7","type":"module"}')
   const result = Bun.spawnSync([process.execPath, 'src/cli.ts', '--version'], { cwd: directory })
   expect(result.exitCode).toBe(0)
@@ -177,7 +178,7 @@ test.each([
   { config: { base: null }, message: 'base must be a non-empty string' },
   { config: { gate: ' ' }, message: 'gate must be a non-empty string' },
   { config: { push: 'true' }, message: 'push must be a boolean' },
-  { config: { harness: 'other' }, message: 'harness must be claude, codex, or pi' },
+  { config: { harness: 'other' }, message: `harness must be ${harnessChoices}` },
   { config: { harnessPaths: [] }, message: 'harnessPaths must be an object' },
   {
     config: { harnessPaths: { claude: 1 } },
@@ -214,7 +215,7 @@ test.each([
   })
 })
 
-test.each(['claude', 'codex', 'pi'])('%s validates its role map', async (harness) => {
+test.each(harnessNames)('%s validates its role map', async (harness) => {
   for (const value of [null, [], 'opus', 1, false]) {
     writeConfig({ models: { [harness]: value } })
     await expect(loadConfig(directory)).rejects.toThrow(`models.${harness} must be an object`)
@@ -297,8 +298,35 @@ test.each([
   { arguments: ['status', 'epic', 'extra'], message: 'Usage: simmer status <epic>' },
   {
     arguments: ['child', 'bead', '--harness', 'other'],
-    message: '--harness must be claude, codex, or pi'
+    message: `--harness must be ${harnessChoices}`
   }
 ])('bad arguments report $message', ({ arguments: commandArguments, message }) => {
   expect(run(commandArguments)).toEqual({ exitCode: 1, stdout: '', stderr: `${message}\n` })
 })
+
+test.each(harnessNames)(
+  '%s loads registry defaults and accepts config overrides',
+  async (harness) => {
+    const defaults = await loadConfig(directory)
+    expect(defaults.harnessPaths[harness]).toBe(harnessRegistry[harness].defaultBinary)
+    expect(defaults.models[harness]).toEqual(harnessRegistry[harness].defaultModels)
+    writeConfig({
+      harness,
+      harnessPaths: { [harness]: '/custom/binary' },
+      models: { [harness]: { reviewer: 'custom-review' } }
+    })
+    const config = await loadConfig(directory)
+    expect(config.harness).toBe(harness)
+    expect(config.harnessPaths[harness]).toBe('/custom/binary')
+    expect(config.models[harness].reviewer).toBe('custom-review')
+    expect(defaults.models[harness]).toEqual(harnessRegistry[harness].defaultModels)
+  }
+)
+
+test.each(['other', 'toString', '__proto__', null, 12])(
+  'config rejects unregistered harness %s',
+  async (harness) => {
+    writeConfig({ harness })
+    await expect(loadConfig(directory)).rejects.toThrow(`harness must be ${harnessChoices}`)
+  }
+)

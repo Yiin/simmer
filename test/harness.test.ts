@@ -13,6 +13,7 @@ import type { Harness } from '../src/config'
 import { loadConfig } from '../src/config'
 import { runHarness } from '../src/harness'
 import { rolePrompt } from '../src/harness/process'
+import { harnessNames, harnessRegistry } from '../src/harness/registry'
 
 let directory: string
 let originalPath: string | undefined
@@ -753,4 +754,9 @@ test('invalid usage stays undefined while reported zero usage stays zero', async
     ])
   )
   expect((await run('claude')).usage).toBeUndefined()
+})
+
+test.each(harnessNames)('%s registry entry has a binary and run function', (harness) => {
+  expect(harnessRegistry[harness].defaultBinary.trim()).not.toBe('')
+  expect(typeof harnessRegistry[harness].run).toBe('function')
 })

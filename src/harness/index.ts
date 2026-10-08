@@ -1,8 +1,6 @@
 import type { Config } from '../config'
-import { run as claude } from './claude'
-import { run as codex } from './codex'
-import { run as pi } from './pi'
 import type { RunOptions } from './process'
+import { harnessRegistry } from './registry'
 
 export type { HarnessResult, Usage } from './process'
 
@@ -12,7 +10,7 @@ export function runHarness(
   }
 ) {
   const { config } = options
-  return { claude, codex, pi }[config.harness]({
+  return harnessRegistry[config.harness].run({
     prompt: options.prompt,
     cwd: options.cwd,
     models: config.models[config.harness],

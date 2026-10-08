@@ -1,7 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import {
+  type Harness,
+  harnessChoices,
+  harnessNames,
+  isHarness,
+  mapHarnesses
+} from './harness/registry'
 
-export type Harness = 'claude' | 'codex' | 'pi'
+export type { Harness } from './harness/registry'
 export type ModelRole = 'planner' | 'implementer' | 'reviewer' | 'tester'
 export type RoleModels = Partial<Record<ModelRole, string>>
 
@@ -104,8 +111,8 @@ export async function loadConfig(projectRoot = process.cwd()): Promise<Config> {
     'models'
   ])
   const harness = config.harness === undefined ? 'claude' : config.harness
-  if (harness !== 'claude' && harness !== 'codex' && harness !== 'pi') {
-    invalid('harness', 'must be claude, codex, or pi')
+  if (!isHarness(harness)) {
+    invalid('harness', `must be ${harnessChoices}`)
   }
   const push = config.push === undefined ? false : config.push
   if (typeof push !== 'boolean') invalid('push', 'must be a boolean')
@@ -120,9 +127,9 @@ export async function loadConfig(projectRoot = process.cwd()): Promise<Config> {
 
   const harnessPaths =
     config.harnessPaths === undefined ? {} : object(config.harnessPaths, 'harnessPaths')
-  knownFields(harnessPaths, ['claude', 'codex', 'pi'], 'harnessPaths.')
+  knownFields(harnessPaths, harnessNames, 'harnessPaths.')
   const models = config.models === undefined ? {} : object(config.models, 'models')
-  knownFields(models, ['claude', 'codex', 'pi'], 'models.')
+  knownFields(models, harnessNames, 'models.')
 
   return {
     base: text(config.base === undefined ? 'main' : config.base, 'base'),
@@ -132,27 +139,13 @@ export async function loadConfig(projectRoot = process.cwd()): Promise<Config> {
     ),
     push,
     harness,
-    harnessPaths: {
-      claude: text(
-        harnessPaths.claude === undefined ? 'claude' : harnessPaths.claude,
-        'harnessPaths.claude'
-      ),
-      codex: text(
-        harnessPaths.codex === undefined ? 'codex' : harnessPaths.codex,
-        'harnessPaths.codex'
-      ),
-      pi: text(harnessPaths.pi === undefined ? 'pi' : harnessPaths.pi, 'harnessPaths.pi')
-    },
+    harnessPaths: mapHarnesses(({ defaultBinary }, name) =>
+      text(
+        harnessPaths[name] === undefined ? defaultBinary : harnessPaths[name],
+        `harnessPaths.${name}`
+      )
+    ),
     watchdogMinutes,
-    models: {
-      claude: roleModels(models.claude, 'claude', {
-        planner: 'opus',
-        implementer: 'sonnet',
-        reviewer: 'opus',
-        tester: 'opus'
-      }),
-      codex: roleModels(models.codex, 'codex', { reviewer: 'claude:opus' }),
-      pi: roleModels(models.pi, 'pi', { reviewer: 'claude:opus' })
-    }
+    models: mapHarnesses(({ defaultModels }, name) => roleModels(models[name], name, defaultModels))
   }
 }
