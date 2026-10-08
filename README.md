@@ -2,6 +2,8 @@
 
 simmer runs a bd epic unattended. It takes one ready child at a time, hands it to a fresh headless agent in its own worktree, checks the result, and lands it on the base branch. bd is the only state store, so a crashed run resumes by running the same command again.
 
+It runs on seven harnesses: Claude Code, Codex, Pi, Gemini CLI, Kimi, OpenCode, and Crush. Each one uses your own login or API key for that CLI.
+
 It replaces `t3 epic cook`. It does not need t3code, forge, or a server.
 
 ## What it does and does not do
@@ -21,7 +23,7 @@ simmer child <bead> [--worktree <path>] [--no-land]
 simmer status <epic>              print progress from bd
 ```
 
-Common flags: `--harness claude|codex|pi`, `--json` (one JSON event per line on stdout, for forge).
+Common flags: `--harness claude|codex|pi|gemini|kimi|opencode|crush`, `--json` (one JSON event per line on stdout, for forge).
 
 ## One child, step by step
 
@@ -78,11 +80,11 @@ Nothing is kept in memory across commands. `simmer run <epic>` after a crash fin
 }
 ```
 
-`models` maps each harness to its cook-it stage models. Claude defaults to `opus` for planner, reviewer, and tester, and `sonnet` for implementer. Codex and Pi default to `claude:opus` for reviewer. Their other roles have no model hint and use the current harness defaults. Partial maps inherit defaults only for their own harness. A `--harness` override selects that harness's map.
+`models` maps each harness to its cook-it stage models. Claude defaults to `opus` for planner, reviewer, and tester, and `sonnet` for implementer. The other harnesses default to `claude:opus` for reviewer. Their other roles have no model hint and use the current harness defaults. Partial maps inherit defaults only for their own harness. A `--harness` override selects that harness's map.
 
-In the Codex and Pi maps, `claude:<model>` runs that role as a one-shot Claude Code process. For example, setting `models.codex.reviewer` to `claude:sonnet` selects Claude Sonnet for review. simmer prints a complete script that writes the brief to a temporary file and runs `claude -p --model sonnet --permission-mode bypassPermissions "$(cat "$brief")" < /dev/null`. The script uses `claude` from `PATH`, not `harnessPaths.claude`. It removes the temporary file when the process exits. Claude role briefs must forbid repository edits. The main worker applies proposed changes. The worker watchdog covers these Claude role processes. A silent process can reach `watchdogMinutes` and trigger the watchdog.
+In the maps of the other harnesses, `claude:<model>` runs that role as a one-shot Claude Code process. For example, setting `models.codex.reviewer` to `claude:sonnet` selects Claude Sonnet for review. simmer prints a complete script that writes the brief to a temporary file and runs `claude -p --model sonnet --permission-mode bypassPermissions "$(cat "$brief")" < /dev/null`. The script uses `claude` from `PATH`, not `harnessPaths.claude`. It removes the temporary file when the process exits. Claude role briefs must forbid repository edits. The main worker applies proposed changes. The worker watchdog covers these Claude role processes. A silent process can reach `watchdogMinutes` and trigger the watchdog.
 
-Claude receives role definitions through `--agents` JSON. Its map accepts plain model names, such as `opus`, and rejects `claude:<model>`. Codex and Pi receive stage instructions in their prompts. Plain model hints stay in the selected harness. Set a plain reviewer model to use the selected harness for review. A hint that the harness cannot run does not select another harness. simmer does not generate Pi subagent config.
+Claude receives role definitions through `--agents` JSON. Its map accepts plain model names, such as `opus`, and rejects `claude:<model>`. The other harnesses receive stage instructions in their prompts. Plain model hints stay in the selected harness. Set a plain reviewer model to use the selected harness for review. A hint that the harness cannot run does not select another harness. simmer does not generate Pi subagent config.
 
 simmer validates the config shape and non-empty model names. A `claude:` suffix must name a model without control characters or a leading `-`. It does not check provider availability. Flat role maps are invalid. Review model reports require verified process output or session metadata. Add `--output-format json` to the printed Claude command to inspect `modelUsage`. If the output does not identify the model, report it as unknown. The requested model and the model's own description do not prove which model ran.
 

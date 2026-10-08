@@ -29,7 +29,7 @@ Check all of these before you launch. If one fails, report it and fix it instead
 
 Do not require a clean working tree. simmer never touches the primary checkout while a worker runs. Uncommitted files there do not block a run.
 
-**Harness.** simmer uses the harness from `simmer.json`. Pass `--harness claude|codex|pi` only when the user names one, or when the config leaves it unset and you run inside Codex or Pi.
+**Harness.** simmer uses the harness from `simmer.json`. Pass `--harness claude|codex|pi|gemini|kimi|opencode|crush` only when the user names one, or when the config leaves it unset and you run inside a harness other than Claude Code.
 
 **Push.** simmer pushes the base branch after each landing only when `simmer.json` sets `push: true`. Otherwise it lands locally. Say "gated, landed locally" in reports, never "pushed".
 
