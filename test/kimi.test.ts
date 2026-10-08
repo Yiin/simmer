@@ -39,32 +39,37 @@ process.exitCode = ${exitCode}
       cwd: directory,
       config: override ? { ...config, harness: 'kimi' } : config
     })
-    const invocation: unknown = JSON.parse(await readFile(join(directory, 'invocation.json'), 'utf8'))
+    const invocation: unknown = JSON.parse(
+      await readFile(join(directory, 'invocation.json'), 'utf8')
+    )
     return { result, invocation, directory }
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
 }
 
-test.each([false, true])('Kimi reads the live fixture with harness override=%s', async (override) => {
-  const { result, invocation, directory } = await execute(fixture, 0, override)
-  expect(result).toEqual({
-    exitCode: 0,
-    finalMessage,
-    usage: undefined,
-    killedByWatchdog: false
-  })
-  expect(invocation).toEqual({
-    arguments: [
-      '-p',
-      rolePrompt(prompt, { planner: 'custom-plan', reviewer: 'claude:opus' }),
-      '--output-format',
-      'stream-json'
-    ],
-    cwd: directory,
-    stdin: ''
-  })
-})
+test.each([false, true])(
+  'Kimi reads the live fixture with harness override=%s',
+  async (override) => {
+    const { result, invocation, directory } = await execute(fixture, 0, override)
+    expect(result).toEqual({
+      exitCode: 0,
+      finalMessage,
+      usage: undefined,
+      killedByWatchdog: false
+    })
+    expect(invocation).toEqual({
+      arguments: [
+        '-p',
+        rolePrompt(prompt, { planner: 'custom-plan', reviewer: 'claude:opus' }),
+        '--output-format',
+        'stream-json'
+      ],
+      cwd: directory,
+      stdin: ''
+    })
+  }
+)
 
 test('Kimi preserves the final assistant message on a failed exit', async () => {
   const { result } = await execute(fixture, 9)

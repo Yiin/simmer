@@ -47,3 +47,9 @@ KIMI_API_KEY on https://api.kimi.com/coding/v1 with kimi-for-coding still return
 Successful probe used KIMI_MODEL_NAME=kimi-k3, KIMI_MODEL_BASE_URL=https://api.moonshot.ai/v1, KIMI_MODEL_API_KEY from get-token MOONSHOT_API_KEY, and KIMI_CODE_NO_AUTO_UPDATE=1. Invocation: kimi -p <prompt> --output-format stream-json. Exit 0. hello.txt contains the exact line. Write and Bash tools ran without approval. No global config or login change.
 
 The fixture keeps the real version, tool calls, tool results, and final assistant message. It omits the resume hint. No paths or secrets appear. Kimi 2.0.0's PromptJsonWriter emits no token usage. The adapter will leave usage undefined.
+
+2026-10-08T04:00:18.665933+00:00 Committed the adapter as 36e95c9. Fixture tests passed. Smoke run 1 is active with Moonshot API auth.
+
+Gate caught a shared test type widened to all registry names. Narrowed its existing three-harness list with satisfies Harness[]. No shared production process or config change. The first formatter run used bunx before frozen install; the locked formatter then required two formatting fixes. Applied the locked formatter.
+
+Removed simmer-kag.10 as a blocker of simmer-kag.5. Subscription access remains a follow-up, but per-run Moonshot auth works.
