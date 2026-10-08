@@ -51,3 +51,7 @@ HX2 merged Gemini at 09f9892 while the gate ran. Rebase will keep both harness e
 2026-10-08T04:06:59.324342+00:00 Rebased onto Gemini and Kimi. Their registry entries and README rows remain present.
 
 The other test suites finished before this gate. The final tree changes seven files. The shared test typing fix already exists on main through HX2, so it is absent from the final HX1 diff. Shared production process and config code remain unchanged.
+
+2026-10-08T04:09:14.294397+00:00 Final gate passed after rebase: frozen install, typecheck, lint, 324 tests, zero failures.
+
+The test run took 124.73 seconds. Another lane started a suite during this run, but no test failed. No executable code changed after this gate. The branch is ready for ff-only merge and push.
