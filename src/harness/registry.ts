@@ -24,7 +24,11 @@ export const harnessRegistry = {
   pi: { defaultBinary: 'pi', run: pi, defaultModels: { reviewer: 'claude:opus' } },
   gemini: { defaultBinary: 'gemini', run: gemini, defaultModels: { reviewer: 'claude:opus' } },
   kimi: { defaultBinary: 'kimi', run: kimi, defaultModels: { reviewer: 'claude:opus' } },
-  opencode: { defaultBinary: 'opencode', run: opencode, defaultModels: { reviewer: 'claude:opus' } },
+  opencode: {
+    defaultBinary: 'opencode',
+    run: opencode,
+    defaultModels: { reviewer: 'claude:opus' }
+  },
   crush: { defaultBinary: 'crush', run: crush, defaultModels: { reviewer: 'claude:opus' } }
 } satisfies Record<string, HarnessDefinition>
 

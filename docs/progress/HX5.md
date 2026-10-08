@@ -45,3 +45,5 @@ Claude regression smoke PASS: 22.360 s, 224518 reported tokens. Crush smoke atte
 Claude smoke PASS remains 22.360 s, 224518 tokens. Post-rebase frozen install and gate PASS: typecheck, lint, 320 tests, zero failures, 96.49 s. Rebase kept Gemini and Kimi entries. OpenCode has since landed, so rebase and gate again before merge.
 
 Filed simmer-kag.12 to make the smoke task's final-newline requirement explicit and make the worker gate match the final byte comparison. This does not block the adapter. The temporary provider prefix required final newlines for the passing smoke. Secret scans passed. Deleted temporary Crush provider config, cache, data, and probe directories. The owner's global configuration and credentials were not changed. Automatic approval review rejected rm cleanup. Python cleanup checked exact temporary parents, prefixes, and provider config before deletion.
+
+2026-10-08T04:13:14.402656+00:00 Rebased onto OpenCode main f21ad92. Kept every harness entry and README row. The gate caught registry formatting after conflict resolution. Applied the formatter and restarted the full gate. Review page updated at the HX5-review path.
