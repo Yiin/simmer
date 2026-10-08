@@ -115,3 +115,15 @@ test('Gemini replaces aggregate usage rather than counting it twice', async () =
     cacheWriteTokens: 0
   })
 })
+
+test('Gemini keeps reported text and usage when the process exits with an error', async () => {
+  const result = await run(fixture, 9)
+  expect(result.exitCode).toBe(9)
+  expect(result.finalMessage).toBe('Probe complete.')
+  expect(result.usage).toEqual({
+    inputTokens: 32820,
+    outputTokens: 219,
+    cacheReadTokens: 32602,
+    cacheWriteTokens: 0
+  })
+})

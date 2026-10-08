@@ -36,3 +36,9 @@ Review page: /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e13
 Gemini 0.57.0 completed the shell-write and file-read probe. The trimmed fixture replaces temporary paths with /workspace and the session ID with probe-session. Assistant chunks use delta=true. Tool calls separate assistant turns. Result stats report input_tokens, cached, input (uncached), and output_tokens. The parser will use uncached input and output, plus cached reads. total_tokens also includes other provider counts, so it is not the sum of these fields.
 
 Installed help confirms all flags. Headless reference: https://geminicli.com/docs/cli/headless/. No shared process or config change is needed.
+
+2026-10-08T03:58:37.719252+00:00 Committed adapter, registry entry, fixture, README row, and parser tests as da5ea29.
+
+The fixture test verifies flags, cwd, empty stdin, environment auth, final text, and cached usage. Other tests cover final chunks, absent usage, nonzero exits, and aggregate replacement. The existing adapter test list now uses satisfies Harness[] to keep its three fixture keys narrow when registry names grow. No production code outside the adapter and registry changed.
+
+The first test helper passed an unsupported second argument to loadConfig. It selected default Claude and hit the test timeout. Fixed the helper to write simmer.json before loading config. The Gemini tests now pass.
