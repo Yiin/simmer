@@ -33,3 +33,7 @@ The smoke command uses embedded Beads, a forced local BEADS_DIR, loopback host, 
 Automatic approval review rejected rm -rf for the local probe. The replacement checks its exact path and project ID before cleanup.
 
 2026-10-08T03:49:33.463832+00:00 The second gate had one timeout in an unchanged pipeline test: three claims lost during the pipeline do not trigger the fatal error limit. Its 5791.11 ms exceeded the 5000 ms test timeout while two gate runs overlapped. The first gate passed. The final gate now runs alone. No test timeout or behavior was changed.
+
+2026-10-08T03:50:21.217401+00:00 Final gate passed after rebase: frozen install, typecheck, lint, and 292 tests with zero failures. The test run took 75.43 s. No production code changed after this gate.
+
+Review page: /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e136/scratchpad/HX0-review/index.html. It includes smoke outputs and the Codex diagnostic. The coordinator can start the five harness lanes after merge.
