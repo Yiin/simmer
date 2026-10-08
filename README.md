@@ -93,6 +93,7 @@ simmer validates the config shape and non-empty model names. A `claude:` suffix 
 | Claude Code | `claude -p --output-format stream-json --agents <json>` |
 | Codex | `codex exec --json -s danger-full-access` (the workspace-write sandbox cannot write a worktree's git dir) |
 | Pi | `pi -p --mode json` with stage instructions in the prompt |
+| Gemini CLI | `gemini -p "<prompt>" --output-format stream-json --approval-mode yolo --sandbox=false --skip-trust` |
 
 Each adapter returns the exit status, the final message, and token usage.
 `src/harness/registry.ts` defines each harness name, default binary, run function, and default role models.

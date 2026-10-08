@@ -17,7 +17,7 @@ import { harnessNames, harnessRegistry } from '../src/harness/registry'
 
 let directory: string
 let originalPath: string | undefined
-const harnesses: Harness[] = ['claude', 'codex', 'pi']
+const harnesses = ['claude', 'codex', 'pi'] satisfies Harness[]
 
 beforeEach(() => {
   directory = mkdtempSync('/tmp/simmer-harness-')

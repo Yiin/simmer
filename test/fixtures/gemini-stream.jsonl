@@ -1,0 +1,10 @@
+{"type":"init","timestamp":"2026-10-08T03:55:56.787Z","session_id":"probe-session","model":"auto"}
+{"type":"message","timestamp":"2026-10-08T03:55:56.788Z","role":"user","content":"Use the shell tool to write hello.txt with the single line: gemini probe ok. Read hello.txt with the file tool. Reply exactly: Probe complete."}
+{"type":"message","timestamp":"2026-10-08T03:56:05.021Z","role":"assistant","content":"I will execute a shell command to write \"gemini probe ok\" into","delta":true}
+{"type":"message","timestamp":"2026-10-08T03:56:05.186Z","role":"assistant","content":" a file named `hello.txt` in the workspace directory. This modifies the filesystem by creating a new file.","delta":true}
+{"type":"tool_use","timestamp":"2026-10-08T03:56:05.535Z","tool_name":"run_shell_command","tool_id":"run_shell_command__call_30836","parameters":{"description":"Writes 'gemini probe ok' to hello.txt in the workspace directory.","command":"echo \"gemini probe ok\" > /workspace/hello.txt","dir_path":"/workspace"}}
+{"type":"tool_result","timestamp":"2026-10-08T03:56:05.572Z","tool_id":"run_shell_command__call_30836","status":"success","output":""}
+{"type":"tool_use","timestamp":"2026-10-08T03:56:06.868Z","tool_name":"read_file","tool_id":"read_file__call_32795","parameters":{"file_path":"/workspace/hello.txt"}}
+{"type":"tool_result","timestamp":"2026-10-08T03:56:06.887Z","tool_id":"read_file__call_32795","status":"success","output":""}
+{"type":"message","timestamp":"2026-10-08T03:56:08.408Z","role":"assistant","content":"Probe complete.","delta":true}
+{"type":"result","timestamp":"2026-10-08T03:56:08.418Z","status":"success","stats":{"total_tokens":66983,"input_tokens":65422,"output_tokens":219,"cached":32602,"input":32820,"duration_ms":11631,"tool_calls":2,"models":{"gemini-3.1-flash-lite":{"total_tokens":1144,"input_tokens":805,"output_tokens":52,"cached":0,"input":805},"gemini-3.5-flash":{"total_tokens":65839,"input_tokens":64617,"output_tokens":167,"cached":32602,"input":32015}}}}
