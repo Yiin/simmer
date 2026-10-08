@@ -27,3 +27,17 @@ test/harness.test.ts declared its three-harness list as all Harness values. Addi
 Live smoke run 1 found a cwd defect. OpenCode reads process.env.PWD before process.cwd(). Simmer starts the worker with cwd set, but PWD still names the main checkout. The worker wrote and committed hello.txt there. Its linked worktree stayed unchanged.
 
 Version source confirms the cause: https://github.com/anomalyco/opencode/blob/v1.18.32/packages/opencode/src/cli/cmd/run.ts. The root assignment uses Filesystem.resolve(process.env.PWD ?? process.cwd()). Added the installed --dir flag with the absolute worktree path. No shared process change is needed. Invocation tests now require --dir.
+
+2026-10-08T04:00:20.587339+00:00 Smoke run 1 eventually passed on retry.
+
+Attempt 1 took 42.722 seconds and reported 310278 tokens. Attempt 2 took 138.857 seconds and reported 1225298 tokens. The retry detected the worktree and created a commit there. A fresh smoke run now checks the --dir fix from the start.
+
+2026-10-08T04:02:39.227709+00:00 The --dir smoke passed on attempt 1 with OpenCode 1.18.32.
+
+Duration: 86.347 seconds. Tokens: input 32020, output 2515, cache read 293888, cache write 0, total 328423. These numbers cover the worker. Separate Claude reviewer calls are not included.
+
+PASS verified exit 0, exact hello.txt on main, and a closed child. The smoke command removed its temporary repository. PATH used the installed mise binary, so no harnessPaths override was needed.
+
+The fixed gate passed: frozen install, typecheck, lint, and 307 tests with zero failures. No changes were needed in process.ts or config.ts. The extra Claude smoke condition does not apply.
+
+Review folder: /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e136/scratchpad/HX1-review/. No follow-up bead is needed. No coordinator decision is needed.
