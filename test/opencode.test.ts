@@ -58,6 +58,8 @@ test('OpenCode uses headless flags, writable agent, role prompt, and per-run per
       '--auto',
       '--agent',
       'build',
+      '--dir',
+      directory,
       rolePrompt(prompt, { reviewer: 'claude:opus' })
     ],
     cwd: directory,

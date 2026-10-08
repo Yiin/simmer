@@ -12,6 +12,8 @@ export function run(options: RunOptions) {
       '--auto',
       '--agent',
       'build',
+      '--dir',
+      options.cwd,
       rolePrompt(options.prompt, options.models)
     ],
     { ...options, env: { ...options.env, OPENCODE_PERMISSION: '{"*":"allow"}' } },
