@@ -42,3 +42,7 @@ Installed help confirms all flags. Headless reference: https://geminicli.com/doc
 The fixture test verifies flags, cwd, empty stdin, environment auth, final text, and cached usage. Other tests cover final chunks, absent usage, nonzero exits, and aggregate replacement. The existing adapter test list now uses satisfies Harness[] to keep its three fixture keys narrow when registry names grow. No production code outside the adapter and registry changed.
 
 The first test helper passed an unsupported second argument to loadConfig. It selected default Claude and hit the test timeout. Fixed the helper to write simmer.json before loading config. The Gemini tests now pass.
+
+2026-10-08T04:00:43.877028+00:00 Frozen install and full gate passed. Typecheck and lint passed. 301 tests passed, zero failed, in 81.14 s. Six Gemini tests passed.
+
+Live smoke run 1 started with GEMINI_API_KEY from the token store in the invoking shell. The key stays in the environment. The default PATH binary reports 0.57.0, matching the probe. Installed bundle confirms message delta chunks and result stats semantics.
