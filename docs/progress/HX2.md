@@ -52,3 +52,5 @@ Live smoke run 1 started with GEMINI_API_KEY from the token store in the invokin
 The smoke inherited GEMINI_API_KEY. No absolute binary override was needed. The temporary smoke directory was removed after PASS. No process.ts or config.ts changes were made, so an extra Claude smoke is not required.
 
 Review page: /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e136/scratchpad/HX2-review/index.html. No follow-up work or coordinator decision is needed. Final rebase and gate precede the merge.
+
+2026-10-08T04:02:47.305318+00:00 Final gate passed after rebase on main e7daa35. Frozen install, typecheck, lint, and 301 tests passed. Zero failures. Test duration: 69.81 s. Production code did not change after this gate. Delivery uses an ff-only merge and origin main push. No follow-up beads or coordinator decisions remain.
