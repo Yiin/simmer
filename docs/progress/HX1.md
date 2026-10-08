@@ -47,3 +47,7 @@ Review folder: /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e
 The unchanged test three claims lost during the pipeline do not trigger the fatal error limit took 9537.19 ms against its 5000 ms limit. All other tests passed. The two earlier gates passed the same test. Three bun test processes overlapped. The gate will run again after the other suites finish. No timeout or behavior change is needed.
 
 HX2 merged Gemini at 09f9892 while the gate ran. Rebase will keep both harness entries and README rows.
+
+2026-10-08T04:06:59.324342+00:00 Rebased onto Gemini and Kimi. Their registry entries and README rows remain present.
+
+The other test suites finished before this gate. The final tree changes seven files. The shared test typing fix already exists on main through HX2, so it is absent from the final HX1 diff. Shared production process and config code remain unchanged.
