@@ -65,3 +65,7 @@ Only the harness registry changed in shared production code. process.ts and conf
 Review page updated at /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e136/scratchpad/HX4-review/index.html. It includes the invocation, environment auth names, real stream sample, and smoke output. No secrets appear.
 
 2026-10-08T04:03:43.867561+00:00 The first post-rebase gate passed with 300 tests, zero failures (93.02 s). Gemini lane merged meanwhile as 09f9892. Rebased on that main and kept both Gemini and Kimi registry entries and README rows. Only those two files conflicted. The next gate checks the combined tree.
+
+2026-10-08T04:06:05.014318+00:00 Final combined gate passed after rebase: frozen install, typecheck, lint, 309 tests, zero failures. Tests took 129.98 s. No production change followed this gate. Ready for ff-only merge and push.
+
+No new follow-up beads. Existing simmer-kag.10 remains open for subscription access. Moonshot per-run auth supplies the live proof. No coordinator decision is required. Review folder remains HX4-review in the coordinator scratchpad.
