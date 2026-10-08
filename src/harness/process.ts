@@ -191,7 +191,7 @@ async function killTree(processId: number, workerId: string): Promise<void> {
 export async function runProcess(
   command: string[],
   options: RunOptions,
-  parse: (event: Record<string, unknown>) => StreamEvent
+  parse: ((event: Record<string, unknown>) => StreamEvent) | 'text'
 ): Promise<HarnessResult> {
   let previousHead = await head(options.cwd)
   let lastActivity = performance.now()
@@ -221,6 +221,7 @@ export async function runProcess(
   if (options.signal?.aborted) abort()
 
   function consume(line: string) {
+    if (parse === 'text') return
     let value: unknown
     try {
       value = JSON.parse(line)
@@ -238,6 +239,10 @@ export async function runProcess(
   worker.stdout.setEncoding('utf8')
   worker.stdout.on('data', (chunk: string) => {
     lastActivity = performance.now()
+    if (parse === 'text') {
+      finalMessage += chunk
+      return
+    }
     pending += chunk
     let newline = pending.indexOf('\n')
     while (newline !== -1) {
@@ -281,7 +286,7 @@ export async function runProcess(
     const totals = [...tokenUsage.values()]
     return {
       exitCode,
-      finalMessage,
+      finalMessage: parse === 'text' ? finalMessage.trim() : finalMessage,
       usage: totals.length
         ? totals.reduce(
             (total, value) => ({

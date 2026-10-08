@@ -96,6 +96,7 @@ simmer validates the config shape and non-empty model names. A `claude:` suffix 
 | Gemini CLI | `gemini -p "<prompt>" --output-format stream-json --approval-mode yolo --sandbox=false --skip-trust` |
 | Kimi | `kimi -p "<prompt>" --output-format stream-json` with stage instructions in the prompt; prompt mode auto-approves |
 | OpenCode | `OPENCODE_PERMISSION='{"*":"allow"}' opencode run --format json --auto --agent build --dir "<worktree>" "<prompt>"` with stage instructions in the prompt |
+| Crush | `CRUSH_CLIENT_SERVER=0 crush run --quiet --cwd <path> <prompt>` with stage instructions in the prompt. Plain text output; token usage is not reported. |
 
 Each adapter returns the exit status, the final message, and token usage.
 `src/harness/registry.ts` defines each harness name, default binary, run function, and default role models.
