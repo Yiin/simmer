@@ -63,3 +63,5 @@ Only the harness registry changed in shared production code. process.ts and conf
 2026-10-08T04:01:40.916216+00:00 Frozen install and gate passed: typecheck, lint, 300 tests, zero failures. Tests took 65.19 s. No shared config or process change. Diff review confirmed only the adapter, registry entry, fixture tests, one shared test type annotation, README row, and lane log changed.
 
 Review page updated at /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e136/scratchpad/HX4-review/index.html. It includes the invocation, environment auth names, real stream sample, and smoke output. No secrets appear.
+
+2026-10-08T04:03:43.867561+00:00 The first post-rebase gate passed with 300 tests, zero failures (93.02 s). Gemini lane merged meanwhile as 09f9892. Rebased on that main and kept both Gemini and Kimi registry entries and README rows. Only those two files conflicted. The next gate checks the combined tree.
