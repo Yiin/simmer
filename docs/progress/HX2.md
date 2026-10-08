@@ -46,3 +46,9 @@ The first test helper passed an unsupported second argument to loadConfig. It se
 2026-10-08T04:00:43.877028+00:00 Frozen install and full gate passed. Typecheck and lint passed. 301 tests passed, zero failed, in 81.14 s. Six Gemini tests passed.
 
 Live smoke run 1 started with GEMINI_API_KEY from the token store in the invoking shell. The key stays in the environment. The default PATH binary reports 0.57.0, matching the probe. Installed bundle confirms message delta chunks and result stats semantics.
+
+2026-10-08T04:01:23.734000+00:00 Live smoke run 1 PASS. Gemini 0.57.0 landed exact hello.txt on main and closed the child. Attempt duration: 87085 ms. Uncached input: 119467. Output: 1940. Cache reads: 671596. Cache writes: 0. Simmer total: 793003 tokens. Separate reviewer usage is outside this total.
+
+The smoke inherited GEMINI_API_KEY. No absolute binary override was needed. The temporary smoke directory was removed after PASS. No process.ts or config.ts changes were made, so an extra Claude smoke is not required.
+
+Review page: /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e136/scratchpad/HX2-review/index.html. No follow-up work or coordinator decision is needed. Final rebase and gate precede the merge.
