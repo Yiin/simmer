@@ -53,3 +53,13 @@ The fixture keeps the real version, tool calls, tool results, and final assistan
 Gate caught a shared test type widened to all registry names. Narrowed its existing three-harness list with satisfies Harness[]. No shared production process or config change. The first formatter run used bunx before frozen install; the locked formatter then required two formatting fixes. Applied the locked formatter.
 
 Removed simmer-kag.10 as a blocker of simmer-kag.5. Subscription access remains a follow-up, but per-run Moonshot auth works.
+
+2026-10-08T04:01:30.904307+00:00 Live smoke PASS on run 1. Kimi version 2.0.0 matched the installed binary. No harnessPaths override was needed. Attempt 1 took 100807 ms (100.807 s). Tokens not reported. Exit 0, exact hello.txt on scratch main, child closed, temporary smoke directory removed by the script.
+
+The smoke inherited KIMI_MODEL_NAME=kimi-k3, KIMI_MODEL_BASE_URL=https://api.moonshot.ai/v1, KIMI_MODEL_API_KEY from get-token MOONSHOT_API_KEY, and KIMI_CODE_NO_AUTO_UPDATE=1. The adapter reads no token store and supplies no auth settings. Users supply their own auth.
+
+Only the harness registry changed in shared production code. process.ts and config.ts are unchanged, so the conditional Claude smoke is not required.
+
+2026-10-08T04:01:40.916216+00:00 Frozen install and gate passed: typecheck, lint, 300 tests, zero failures. Tests took 65.19 s. No shared config or process change. Diff review confirmed only the adapter, registry entry, fixture tests, one shared test type annotation, README row, and lane log changed.
+
+Review page updated at /var/tmp/claude-1000/-home-yiin/e4ceb278-5205-4592-9266-27563968e136/scratchpad/HX4-review/index.html. It includes the invocation, environment auth names, real stream sample, and smoke output. No secrets appear.
