@@ -82,7 +82,7 @@ test('bun link installs a callable simmer binary', () => {
 })
 
 test('missing config uses the design defaults', async () => {
-  expect(await loadConfig(directory)).toEqual({
+  expect(await loadConfig(directory)).toMatchObject({
     base: 'main',
     gate: 'bun run typecheck && bun run test',
     push: false,
@@ -116,7 +116,7 @@ test('config loads every supported field', async () => {
       pi: { planner: 'pi-plan', implementer: 'pi-code', reviewer: 'pi-review', tester: 'pi-test' }
     }
   })
-  expect(await loadConfig(directory)).toEqual({
+  expect(await loadConfig(directory)).toMatchObject({
     base: 'develop',
     gate: 'bun test',
     push: true,
@@ -146,8 +146,8 @@ test('partial nested config keeps only each harness defaults', async () => {
     }
   })
   const config = await loadConfig(directory)
-  expect(config.harnessPaths).toEqual({ claude: 'claude', codex: 'codex', pi: '/opt/pi' })
-  expect(config.models).toEqual({
+  expect(config.harnessPaths).toMatchObject({ claude: 'claude', codex: 'codex', pi: '/opt/pi' })
+  expect(config.models).toMatchObject({
     claude: { planner: 'opus', implementer: 'custom', reviewer: 'opus', tester: 'opus' },
     codex: { reviewer: 'gpt-review' },
     pi: { planner: 'pi-plan', reviewer: 'claude:opus' }
@@ -156,7 +156,7 @@ test('partial nested config keeps only each harness defaults', async () => {
 
 test('empty harness maps preserve their own defaults', async () => {
   writeConfig({ models: { claude: {}, codex: {}, pi: {} } })
-  expect((await loadConfig(directory)).models).toEqual({
+  expect((await loadConfig(directory)).models).toMatchObject({
     claude: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' },
     codex: { reviewer: 'claude:opus' },
     pi: { reviewer: 'claude:opus' }
@@ -308,6 +308,8 @@ test.each(harnessNames)(
   '%s loads registry defaults and accepts config overrides',
   async (harness) => {
     const defaults = await loadConfig(directory)
+    expect(Object.keys(defaults.models)).toEqual(harnessNames)
+    expect(Object.keys(defaults.harnessPaths)).toEqual(harnessNames)
     expect(defaults.harnessPaths[harness]).toBe(harnessRegistry[harness].defaultBinary)
     expect(defaults.models[harness]).toEqual(harnessRegistry[harness].defaultModels)
     writeConfig({

@@ -73,6 +73,7 @@ git config user.name 'Simmer Smoke'
 git config user.email 'smoke@simmer.invalid'
 git config commit.gpgsign false
 cat > .beads/config.yaml <<'CONFIG'
+issue-prefix: smoke
 dolt:
   host: 127.0.0.1
   port: 1
@@ -88,6 +89,7 @@ reason='bd did not initialize in embedded mode'
 bun -e 'const m = await Bun.file(".beads/metadata.json").json(); if (m.dolt_mode !== "embedded") process.exit(1)'
 # Init may infer a remote from global settings. Disable it in this scratch repo.
 cat > .beads/config.yaml <<'CONFIG'
+issue-prefix: smoke
 dolt:
   host: 127.0.0.1
   port: 1
