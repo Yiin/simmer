@@ -17,3 +17,7 @@ An invalid provider probe exited 1 and returned a JSON error event. It made no m
 The adapter uses run --format json --auto --agent build and OPENCODE_PERMISSION. It joins text parts for the last message. It sums per-step tokens and deduplicates step IDs. Reasoning tokens count as output because OpenCode reports them separately.
 
 Focused adapter tests passed: 12 tests, zero failures. Frozen dependency install passed. Shared process.ts and config.ts remain unchanged.
+
+2026-10-08T03:55:35.039736+00:00 The first full gate found a shared test typing issue.
+
+test/harness.test.ts declared its three-harness list as all Harness values. Adding a registry entry widened its index type beyond its three-entry fixture map. Changed that declaration to satisfies Harness[]. The list and runtime behavior stay the same. No shared production code changed.
