@@ -20,7 +20,11 @@ export type HarnessResult = {
 export type RunOptions = {
   prompt: string
   cwd: string
-  models: RoleModels
+  // Cook-it stage role models. A lane run omits them and sends the prompt unchanged.
+  models?: RoleModels
+  // One model and reasoning effort for the whole run (simmer lane).
+  model?: string
+  effort?: string
   binary: string
   watchdogMinutes: number
   watchdogIntervalMs?: number
@@ -137,6 +141,16 @@ Report the model only when Claude process output verifies it. You may add --outp
 Model self-description is not verification. If process metadata does not identify the model, report the model as unknown.`
   })
   return `${prompt}\n\nCook-it stage roles:\n${roles.join('\n')}`
+}
+
+// The prompt a harness receives: cook-it runs get stage roles appended, lane runs get the brief as is.
+export function workerPrompt(options: Pick<RunOptions, 'prompt' | 'models'>): string {
+  return options.models ? rolePrompt(options.prompt, options.models) : options.prompt
+}
+
+// A flag and its value, or nothing when the value is not set.
+export function flag(name: string, value: string | undefined): string[] {
+  return value === undefined ? [] : [name, value]
 }
 
 async function head(cwd: string): Promise<string | undefined> {

@@ -1,4 +1,4 @@
-import { type RunOptions, record, rolePrompt, runProcess, usage } from './process'
+import { flag, type RunOptions, record, runProcess, usage, workerPrompt } from './process'
 
 export function run(options: RunOptions) {
   let message = ''
@@ -6,7 +6,8 @@ export function run(options: RunOptions) {
     [
       options.binary,
       '-p',
-      rolePrompt(options.prompt, options.models),
+      workerPrompt(options),
+      ...flag('--model', options.model),
       '--output-format',
       'stream-json',
       '--approval-mode',

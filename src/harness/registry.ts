@@ -12,24 +12,53 @@ type HarnessDefinition = {
   defaultBinary: string
   run: (options: RunOptions) => Promise<HarnessResult>
   defaultModels: RoleModels
+  // Whether the adapter passes RunOptions.effort to its CLI.
+  supportsEffort: boolean
 }
 
 export const harnessRegistry = {
   claude: {
     defaultBinary: 'claude',
     run: claude,
-    defaultModels: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' }
+    defaultModels: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' },
+    supportsEffort: true
   },
-  codex: { defaultBinary: 'codex', run: codex, defaultModels: { reviewer: 'claude:opus' } },
-  pi: { defaultBinary: 'pi', run: pi, defaultModels: { reviewer: 'claude:opus' } },
-  gemini: { defaultBinary: 'gemini', run: gemini, defaultModels: { reviewer: 'claude:opus' } },
-  kimi: { defaultBinary: 'kimi', run: kimi, defaultModels: { reviewer: 'claude:opus' } },
+  codex: {
+    defaultBinary: 'codex',
+    run: codex,
+    defaultModels: { reviewer: 'claude:opus' },
+    supportsEffort: true
+  },
+  pi: {
+    defaultBinary: 'pi',
+    run: pi,
+    defaultModels: { reviewer: 'claude:opus' },
+    supportsEffort: true
+  },
+  gemini: {
+    defaultBinary: 'gemini',
+    run: gemini,
+    defaultModels: { reviewer: 'claude:opus' },
+    supportsEffort: false
+  },
+  kimi: {
+    defaultBinary: 'kimi',
+    run: kimi,
+    defaultModels: { reviewer: 'claude:opus' },
+    supportsEffort: false
+  },
   opencode: {
     defaultBinary: 'opencode',
     run: opencode,
-    defaultModels: { reviewer: 'claude:opus' }
+    defaultModels: { reviewer: 'claude:opus' },
+    supportsEffort: true
   },
-  crush: { defaultBinary: 'crush', run: crush, defaultModels: { reviewer: 'claude:opus' } }
+  crush: {
+    defaultBinary: 'crush',
+    run: crush,
+    defaultModels: { reviewer: 'claude:opus' },
+    supportsEffort: true
+  }
 } satisfies Record<string, HarnessDefinition>
 
 export type Harness = keyof typeof harnessRegistry

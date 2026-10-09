@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { loadConfig } from '../src/config'
 import { runHarness } from '../src/harness'
 import { run } from '../src/harness/crush'
-import { type RunOptions, rolePrompt } from '../src/harness/process'
+import { type RunOptions, workerPrompt } from '../src/harness/process'
 
 const fixture = readFileSync(new URL('./fixtures/crush.txt', import.meta.url), 'utf8')
 let directory: string
@@ -48,7 +48,7 @@ test('Crush returns the live text fixture and runs embedded with role instructio
     killedByWatchdog: false
   })
   expect(JSON.parse(readFileSync(join(directory, 'invocation.json'), 'utf8'))).toEqual({
-    args: ['run', '--quiet', '--cwd', directory, rolePrompt(options.prompt, options.models)],
+    args: ['run', '--quiet', '--cwd', directory, workerPrompt(options)],
     cwd: directory,
     stdin: '',
     embedded: '0',

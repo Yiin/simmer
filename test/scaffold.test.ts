@@ -40,6 +40,7 @@ Commands:
   run <epic>                 Run ready children in order
   child <bead>               Run one child
   status <epic>              Show epic progress
+  lane <brief-file>          Run one brief on one harness (see simmer lane --help)
 
 Options:
   --harness ${harnessNames.join('|')}   Select the worker harness

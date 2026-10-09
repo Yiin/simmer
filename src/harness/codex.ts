@@ -1,4 +1,4 @@
-import { type RunOptions, record, rolePrompt, runProcess, usage } from './process'
+import { flag, type RunOptions, record, runProcess, usage, workerPrompt } from './process'
 
 export function run(options: RunOptions) {
   return runProcess(
@@ -12,7 +12,10 @@ export function run(options: RunOptions) {
       'danger-full-access',
       '-C',
       options.cwd,
-      rolePrompt(options.prompt, options.models)
+      ...flag('-m', options.model),
+      // Codex parses -c values as TOML; a JSON string is a valid TOML basic string.
+      ...flag('-c', options.effort && `model_reasoning_effort=${JSON.stringify(options.effort)}`),
+      workerPrompt(options)
     ],
     options,
     (event) => {

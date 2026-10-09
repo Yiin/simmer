@@ -1,4 +1,4 @@
-import { type RunOptions, rolePrompt, runProcess } from './process'
+import { flag, type RunOptions, runProcess, workerPrompt } from './process'
 
 export function run(options: RunOptions) {
   return runProcess(
@@ -8,7 +8,9 @@ export function run(options: RunOptions) {
       '--quiet',
       '--cwd',
       options.cwd,
-      rolePrompt(options.prompt, options.models)
+      ...flag('--model', options.model),
+      ...flag('--reasoning-effort', options.effort),
+      workerPrompt(options)
     ],
     {
       ...options,

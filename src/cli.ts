@@ -10,6 +10,7 @@ Commands:
   run <epic>                 Run ready children in order
   child <bead>               Run one child
   status <epic>              Show epic progress
+  lane <brief-file>          Run one brief on one harness (see simmer lane --help)
 
 Options:
   --harness ${harnessNames.join('|')}   Select the worker harness
@@ -20,9 +21,28 @@ Options:
   -v, --version              Show the package version
 `
 
-try {
+async function withInterrupts(work: (signal: AbortSignal) => Promise<void>) {
+  const controller = new AbortController()
+  function interrupt(signal: NodeJS.Signals) {
+    const error = new Error(`Interrupted by ${signal}`)
+    controller.abort(error)
+    process.exitCode = signal === 'SIGINT' ? 130 : 143
+  }
+  const onInterrupt = () => interrupt('SIGINT')
+  const onTerminate = () => interrupt('SIGTERM')
+  process.on('SIGINT', onInterrupt)
+  process.on('SIGTERM', onTerminate)
+  try {
+    await work(controller.signal)
+  } finally {
+    process.off('SIGINT', onInterrupt)
+    process.off('SIGTERM', onTerminate)
+  }
+}
+
+async function main(args: string[]) {
   const { values, positionals } = parseArgs({
-    args: process.argv.slice(2),
+    args,
     allowPositionals: true,
     options: {
       help: { type: 'boolean', short: 'h' },
@@ -40,32 +60,23 @@ try {
     process.stdout.write(help)
   } else {
     const [command, target] = positionals
+    const harness = values.harness
     if (command !== 'run' && command !== 'child' && command !== 'status') {
       throw new Error(`Unknown command: ${command}`)
     }
     if (!target || positionals.length !== 2) {
       throw new Error(`Usage: simmer ${command} <${command === 'child' ? 'bead' : 'epic'}>`)
     }
-    if (values.harness !== undefined && !isHarness(values.harness)) {
+    if (harness !== undefined && !isHarness(harness)) {
       throw new Error(`--harness must be ${harnessChoices}`)
     }
     if (command === 'status') {
       const { printStatus } = await import('./status')
       await printStatus({ epic: target, cwd: process.cwd(), json: values.json })
     } else {
-      const controller = new AbortController()
-      function interrupt(signal: NodeJS.Signals) {
-        const error = new Error(`Interrupted by ${signal}`)
-        controller.abort(error)
-        process.exitCode = signal === 'SIGINT' ? 130 : 143
-      }
-      const onInterrupt = () => interrupt('SIGINT')
-      const onTerminate = () => interrupt('SIGTERM')
-      process.on('SIGINT', onInterrupt)
-      process.on('SIGTERM', onTerminate)
-      try {
+      await withInterrupts(async (signal) => {
         const config = await loadConfig()
-        if (values.harness !== undefined) config.harness = values.harness
+        if (harness !== undefined) config.harness = harness
         if (command === 'child') {
           const { runChild } = await import('./child')
           const result = await runChild({
@@ -75,7 +86,7 @@ try {
             worktree: values.worktree,
             noLand: values['no-land'],
             json: values.json,
-            signal: controller.signal
+            signal
           })
           process.exitCode = result.exitCode
         } else if (command === 'run') {
@@ -85,14 +96,29 @@ try {
             cwd: process.cwd(),
             config,
             json: values.json,
-            signal: controller.signal
+            signal
           })
         }
-      } finally {
-        process.off('SIGINT', onInterrupt)
-        process.off('SIGTERM', onTerminate)
-      }
+      })
     }
+  }
+}
+
+try {
+  const args = process.argv.slice(2)
+  if (args[0] === 'lane') {
+    // lane has its own flags, so it parses its arguments itself.
+    const { laneHelp, parseLaneArgs, runLane } = await import('./lane')
+    const options = parseLaneArgs(args.slice(1))
+    if (options === undefined) {
+      process.stdout.write(laneHelp)
+    } else {
+      await withInterrupts(async (signal) => {
+        process.exitCode = await runLane(options, signal)
+      })
+    }
+  } else {
+    await main(args)
   }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)

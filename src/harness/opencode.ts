@@ -1,4 +1,4 @@
-import { type RunOptions, record, rolePrompt, runProcess, usage } from './process'
+import { flag, type RunOptions, record, runProcess, usage, workerPrompt } from './process'
 
 export function run(options: RunOptions) {
   let messageId: string | undefined
@@ -14,7 +14,9 @@ export function run(options: RunOptions) {
       'build',
       '--dir',
       options.cwd,
-      rolePrompt(options.prompt, options.models)
+      ...flag('--model', options.model),
+      ...flag('--variant', options.effort),
+      workerPrompt(options)
     ],
     { ...options, env: { ...options.env, OPENCODE_PERMISSION: '{"*":"allow"}' } },
     (event) => {

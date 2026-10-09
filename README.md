@@ -21,9 +21,40 @@ simmer run <epic>                 run every ready child, one at a time, until no
 simmer child <bead> [--worktree <path>] [--no-land]
                                   run one child; for orchestrators
 simmer status <epic>              print progress from bd
+simmer lane <brief-file> --worktree <dir>
+                                  run one free-form brief on one harness; for coordinators
 ```
 
 Common flags: `--harness claude|codex|pi|gemini|kimi|opencode|crush`, `--json` (one JSON event per line on stdout, for forge).
+
+## One lane
+
+`simmer lane` runs one brief on any harness, headless, in a directory you give it. A coordinator agent uses it to start lanes on any engine through one command.
+
+```
+simmer lane <brief-file> --worktree <dir> [--harness <h>] [--model <m>] [--effort <e>]
+            [--out <file>] [--watchdog-minutes <n>] [--timeout-minutes <n>] [--json]
+```
+
+It sends the full text of the brief file as the prompt and nothing else. It does not claim a bead, add the cook-it prompt, run a gate, land commits, or create the worktree. The caller does all of that. The worktree must already exist.
+
+- `--harness` defaults to the `harness` in the worktree's `simmer.json`, else `claude`.
+- `--model` sets one model for the whole run. `--effort` sets the reasoning effort. Gemini and Kimi have no effort flag, so simmer ignores `--effort` there and says so on stderr.
+- The harness runs unattended with the same permission flags as `simmer child`, so it can commit in the worktree.
+- The final message goes to stdout, and to `--out` when given. Token usage goes to stderr when the harness reports it.
+- The watchdog kills a harness that prints nothing and makes no commit for 45 minutes. The run stops after 720 minutes in total.
+- Exit codes: 0 on success, 124 on timeout, 125 on a watchdog kill, otherwise the harness exit code. Each failure prints a one-line reason on stderr.
+- `--json` prints a `lane-started` event and a `done` event that holds the final message and usage.
+
+| Harness | `--model` | `--effort` |
+|---|---|---|
+| Claude Code | `--model` | `--effort` |
+| Codex | `-m` | `-c model_reasoning_effort="<e>"` |
+| Pi | `--model` | `--thinking` |
+| Gemini CLI | `--model` | not supported |
+| Kimi | `--model` | not supported |
+| OpenCode | `--model` | `--variant` |
+| Crush | `--model` | `--reasoning-effort` |
 
 ## One child, step by step
 
@@ -106,10 +137,10 @@ Config validation, config defaults, dispatch, and CLI help use this registry.
 
 ### Add a harness
 
-1. Add `src/harness/<name>.ts` with `run(options: RunOptions)`. Use `runProcess` to read its event stream. Use `rolePrompt` for stage instructions when the CLI does not support Claude's role agents.
-2. Add one entry to `src/harness/registry.ts`. Set `defaultBinary`, `run`, and `defaultModels`. Use `{ reviewer: 'claude:opus' }` for the default reviewer on non-Claude harnesses.
+1. Add `src/harness/<name>.ts` with `run(options: RunOptions)`. Use `runProcess` to read its event stream. Use `workerPrompt` for the prompt: it adds stage instructions for cook-it runs when the CLI does not support Claude's role agents.
+2. Add one entry to `src/harness/registry.ts`. Set `defaultBinary`, `run`, `defaultModels`, and `supportsEffort`. Use `{ reviewer: 'claude:opus' }` for the default reviewer on non-Claude harnesses. Pass `model` and `effort` to the CLI's own flags for `simmer lane`, and use `workerPrompt(options)` for the prompt.
 3. Add adapter tests in `test/harness.test.ts` or a new test file. Cover invocation, final text, usage, and failure handling.
-4. Add one row to the harness table above.
+4. Add one row to the harness table above and to the lane flag table.
 5. Run `bun install --frozen-lockfile && bun run gate`.
 6. Run `scripts/smoke-harness.sh <name>` with the CLI installed and authenticated.
 

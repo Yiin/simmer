@@ -1,11 +1,12 @@
-import { type RunOptions, rolePrompt, runProcess } from './process'
+import { flag, type RunOptions, runProcess, workerPrompt } from './process'
 
 export function run(options: RunOptions) {
   return runProcess(
     [
       options.binary,
       '-p',
-      rolePrompt(options.prompt, options.models),
+      workerPrompt(options),
+      ...flag('--model', options.model),
       '--output-format',
       'stream-json'
     ],

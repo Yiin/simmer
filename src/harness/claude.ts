@@ -1,4 +1,4 @@
-import { agents, messageText, type RunOptions, record, runProcess, usage } from './process'
+import { agents, flag, messageText, type RunOptions, record, runProcess, usage } from './process'
 
 export function run(options: RunOptions) {
   return runProcess(
@@ -11,8 +11,9 @@ export function run(options: RunOptions) {
       '--verbose',
       '--permission-mode',
       'bypassPermissions',
-      '--agents',
-      JSON.stringify(agents(options.models))
+      ...flag('--model', options.model),
+      ...flag('--effort', options.effort),
+      ...(options.models ? ['--agents', JSON.stringify(agents(options.models))] : [])
     ],
     options,
     (event) => {
