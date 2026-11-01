@@ -31,7 +31,12 @@ export type RunOptions = {
   env?: NodeJS.ProcessEnv
   signal?: AbortSignal
 }
+// claude -p exits 0 with an empty result when a hook stops the turn. secret-scrub does that when a
+// tool result held a secret, so the turn did not finish.
+const HOOK_STOPPED_EXIT = 75
+
 export type StreamEvent = {
+  hookStopped?: boolean
   finalMessage?: string
   usage?: Usage
   usageKey?: string
@@ -212,6 +217,7 @@ export async function runProcess(
   let checking = false
   let closed = false
   let finalMessage = ''
+  let hookStopped = false
   let killedByWatchdog = false
   let pending = ''
   let eventNumber = 0
@@ -243,6 +249,7 @@ export async function runProcess(
       return
     }
     const event = parse(record(value))
+    if (event.hookStopped) hookStopped = true
     if (event.finalMessage !== undefined) finalMessage = event.finalMessage
     if (event.usage) {
       if (event.usageKey === 'total') tokenUsage.clear()
@@ -299,7 +306,7 @@ export async function runProcess(
     consume(pending)
     const totals = [...tokenUsage.values()]
     return {
-      exitCode,
+      exitCode: hookStopped && exitCode === 0 ? HOOK_STOPPED_EXIT : exitCode,
       finalMessage: parse === 'text' ? finalMessage.trim() : finalMessage,
       usage: totals.length
         ? totals.reduce(

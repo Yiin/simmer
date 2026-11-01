@@ -464,6 +464,23 @@ test.each(harnesses)('%s returns a nonzero exit without inventing usage', async 
   expect(invocation().stdin).toBe('')
 })
 
+test('claude reports a turn a hook stopped as a failure, not as an empty success', async () => {
+  fake(
+    'claude',
+    events([
+      {
+        type: 'result',
+        result: '',
+        terminal_reason: 'hook_stopped',
+        usage: { input_tokens: 1, output_tokens: 1 }
+      }
+    ])
+  )
+  const result = await run('claude')
+  expect(result.exitCode).toBe(75)
+  expect(result.finalMessage).toBe('')
+})
+
 test.each(harnesses)('%s keeps its final text and usage on nonzero exit', async (harness) => {
   const output = {
     claude: [

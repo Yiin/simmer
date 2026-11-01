@@ -20,6 +20,7 @@ export function run(options: RunOptions) {
       if (event.type === 'result') {
         const tokens = record(event.usage)
         return {
+          hookStopped: event.terminal_reason === 'hook_stopped',
           finalMessage: typeof event.result === 'string' ? event.result : undefined,
           usage: usage(
             tokens.input_tokens,
