@@ -1,8 +1,26 @@
 import { flag, type RunOptions, record, runProcess, usage, workerPrompt } from './process'
 
 export function run(options: RunOptions) {
+  if (!Bun.which(options.binary, { PATH: options.env?.PATH ?? process.env.PATH })) {
+    return Promise.reject(new Error(`spawn ${options.binary} ENOENT`))
+  }
   return runProcess(
     [
+      'bash',
+      '-c',
+      `set -o pipefail
+scrub=$(command -v secret-scrub || true)
+if [[ -z "$scrub" ]]; then scrub="$HOME/.local/share/secret-scrub/secret-scrub"; fi
+if [[ -x "$scrub" ]] && "$scrub" check >/dev/null 2>&1; then
+  "$@" 2>&1 | "$scrub" stream
+elif [[ "\${SIMMER_ALLOW_UNFILTERED:-}" == 1 ]]; then
+  echo 'WARNING: SIMMER_ALLOW_UNFILTERED=1. Codex output has no secret filter.' >&2
+  exec "$@"
+else
+  echo 'Codex requires secret-scrub and a readable index. Install secret-scrub before starting this lane.' >&2
+  exit 78
+fi`,
+      'simmer-codex',
       options.binary,
       'exec',
       '--json',
@@ -38,6 +56,7 @@ export function run(options: RunOptions) {
         typeof item.text === 'string'
         ? { finalMessage: item.text }
         : {}
-    }
+    },
+    'inherit'
   )
 }

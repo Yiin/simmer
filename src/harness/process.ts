@@ -210,7 +210,8 @@ async function killTree(processId: number, workerId: string): Promise<void> {
 export async function runProcess(
   command: string[],
   options: RunOptions,
-  parse: ((event: Record<string, unknown>) => StreamEvent) | 'text'
+  parse: ((event: Record<string, unknown>) => StreamEvent) | 'text',
+  stderr: 'ignore' | 'inherit' = 'ignore'
 ): Promise<HarnessResult> {
   let previousHead = await head(options.cwd)
   let lastActivity = performance.now()
@@ -227,8 +228,10 @@ export async function runProcess(
     cwd: options.cwd,
     detached: true,
     env: { ...process.env, ...options.env, SIMMER_HARNESS_ID: workerId },
-    stdio: ['ignore', 'pipe', 'ignore']
+    stdio: ['ignore', 'pipe', 'pipe']
   })
+  if (stderr === 'inherit') worker.stderr.on('data', (chunk: Buffer) => process.stderr.write(chunk))
+  else worker.stderr.resume()
   const watchdogMilliseconds = options.watchdogMinutes * 60000
   function abort() {
     if (!closed && worker.pid) {

@@ -135,6 +135,12 @@ Each adapter returns the exit status, the final message, and token usage.
 `src/harness/registry.ts` defines each harness name, default binary, run function, and default role models.
 Config validation, config defaults, dispatch, and CLI help use this registry.
 
+Codex output passes through `secret-scrub stream` before parsing. This covers stdout and stderr.
+Simmer finds the binary on `PATH`, then at `~/.local/share/secret-scrub/secret-scrub`.
+A missing binary or unreadable index stops the lane with exit 78 before Codex starts.
+`SIMMER_ALLOW_UNFILTERED=1` permits a run without the filter and prints a warning.
+Managed Codex `Stop` and `SessionEnd` hooks sweep the rollout separately.
+
 ### Add a harness
 
 1. Add `src/harness/<name>.ts` with `run(options: RunOptions)`. Use `runProcess` to read its event stream. Use `workerPrompt` for the prompt: it adds stage instructions for cook-it runs when the CLI does not support Claude's role agents.

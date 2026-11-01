@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import type { Harness } from '../src/config'
 import { loadConfig } from '../src/config'
 import { runHarness } from '../src/harness'
+import { run as runCodex } from '../src/harness/codex'
 import { rolePrompt } from '../src/harness/process'
 import { harnessNames, harnessRegistry } from '../src/harness/registry'
 
@@ -22,6 +23,14 @@ const harnesses = ['claude', 'codex', 'pi'] satisfies Harness[]
 beforeEach(() => {
   directory = mkdtempSync('/tmp/simmer-harness-')
   mkdirSync(join(directory, 'bin'))
+  writeFileSync(
+    join(directory, 'bin', 'secret-scrub'),
+    `#!/bin/sh
+if [ "$1" = check ]; then exit 0; fi
+cat
+`,
+    { mode: 0o755 }
+  )
   originalPath = process.env.PATH
   process.env.PATH = `${join(directory, 'bin')}:${originalPath ?? ''}`
 })
@@ -581,7 +590,7 @@ process.exit(0)
 `
   )
   expect(await run('codex', 0.005)).toEqual({
-    exitCode: 0,
+    exitCode: 137,
     finalMessage: '',
     usage: undefined,
     killedByWatchdog: true
@@ -785,4 +794,70 @@ test('invalid usage stays undefined while reported zero usage stays zero', async
 test.each(harnessNames)('%s registry entry has a binary and run function', (harness) => {
   expect(harnessRegistry[harness].defaultBinary.trim()).not.toBe('')
   expect(typeof harnessRegistry[harness].run).toBe('function')
+})
+
+async function filteredCodex(env: NodeJS.ProcessEnv = {}) {
+  return runCodex({
+    binary: join(directory, 'bin', 'codex'),
+    prompt: 'test',
+    cwd: directory,
+    watchdogMinutes: 1,
+    env
+  })
+}
+
+test('Codex filters both streams before parsing completed messages', async () => {
+  writeFileSync(
+    join(directory, 'bin', 'secret-scrub'),
+    `#!/bin/sh
+if [ "$1" = check ]; then exit 0; fi
+sed 's/fixture-sensitive-value/[REDACTED]/g'
+`,
+    { mode: 0o755 }
+  )
+  fake(
+    'codex',
+    `
+process.stderr.write(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'fixture-sensitive-value'}})+'\\n')
+process.stdout.write(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'fixture-sensitive-value'}})+'\\n')
+`
+  )
+  expect((await filteredCodex()).finalMessage).toBe('[REDACTED]')
+})
+
+test('Codex refuses to start when the filter check fails', async () => {
+  writeFileSync(join(directory, 'bin', 'secret-scrub'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+  fake('codex', '')
+  expect((await filteredCodex()).exitCode).toBe(78)
+  expect(existsSync(join(directory, 'invocation.json'))).toBe(false)
+})
+
+test('Codex permits an explicit unfiltered override', async () => {
+  writeFileSync(join(directory, 'bin', 'secret-scrub'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+  fake(
+    'codex',
+    events([{ type: 'item.completed', item: { type: 'agent_message', text: 'override' } }])
+  )
+  expect((await filteredCodex({ SIMMER_ALLOW_UNFILTERED: '1' })).finalMessage).toBe('override')
+})
+
+test('Codex preserves worker and filter failures', async () => {
+  fake('codex', 'process.exit(42)')
+  expect((await filteredCodex()).exitCode).toBe(42)
+  writeFileSync(
+    join(directory, 'bin', 'secret-scrub'),
+    `#!/bin/sh
+if [ "$1" = check ]; then exit 0; fi
+cat >/dev/null
+exit 43
+`,
+    { mode: 0o755 }
+  )
+  fake(
+    'codex',
+    events([{ type: 'item.completed', item: { type: 'agent_message', text: 'discarded' } }])
+  )
+  const result = await filteredCodex()
+  expect(result.exitCode).toBe(43)
+  expect(result.finalMessage).toBe('')
 })
