@@ -191,6 +191,7 @@ test('leaves model and effort flags out when not given', () => {
   expect(invocation()).toEqual([
     'exec',
     '--json',
+    '--dangerously-bypass-hook-trust',
     '-s',
     'danger-full-access',
     '-C',

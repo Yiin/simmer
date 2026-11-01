@@ -6,6 +6,9 @@ export function run(options: RunOptions) {
       options.binary,
       'exec',
       '--json',
+      // The secret-scrub PostToolUse hook in ~/.codex/hooks.json must run. An unattended worker
+      // cannot answer /hooks, and an untrusted hook is skipped, which passes secrets to the model.
+      '--dangerously-bypass-hook-trust',
       // workspace-write keeps every .git path read-only, even with --add-dir, so a worker in a
       // linked worktree could not commit. Claude and Pi workers run unsandboxed too.
       '-s',

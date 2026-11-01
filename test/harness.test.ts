@@ -223,7 +223,7 @@ test('Codex parses completed items and usage with workspace and network flags', 
     killedByWatchdog: false
   })
   expect(invocation()).toEqual({
-    arguments: ['exec', '--json', '-s', 'danger-full-access', '-C', directory, defaultRoleText],
+    arguments: ['exec', '--json', '--dangerously-bypass-hook-trust', '-s', 'danger-full-access', '-C', directory, defaultRoleText],
     cwd: directory,
     stdin: ''
   })
