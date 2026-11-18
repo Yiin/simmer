@@ -33,7 +33,8 @@ Common flags: `--harness claude|codex|pi|gemini|kimi|opencode|crush`, `--json` (
 
 ```
 simmer lane <brief-file> --worktree <dir> [--harness <h>] [--model <m>] [--effort <e>]
-            [--out <file>] [--watchdog-minutes <n>] [--timeout-minutes <n>] [--json]
+            [--out <file>] [--usage-out <file>] [--context-ceiling <tokens>] [--max-relays <n>]
+            [--watchdog-minutes <n>] [--timeout-minutes <n>] [--json]
 ```
 
 It sends the full text of the brief file as the prompt and nothing else. It does not claim a bead, add the cook-it prompt, run a gate, land commits, or create the worktree. The caller does all of that. The worktree must already exist.
@@ -45,6 +46,8 @@ It sends the full text of the brief file as the prompt and nothing else. It does
 - The watchdog kills a harness that prints nothing and makes no commit for 45 minutes. The run stops after 720 minutes in total.
 - Exit codes: 0 on success, 124 on timeout, 125 on a watchdog kill, otherwise the harness exit code. Each failure prints a one-line reason on stderr.
 - `--json` prints a `lane-started` event and a `done` event that holds the final message and usage.
+- `--usage-out <file>` writes usage as JSON: tokens, `turns` (model calls on the main thread), `peakContext` (the largest prompt one call sent: input plus cache read plus cache write), `relays`, one entry per agent run, and `summary`, a compact string for a routing ledger such as `out=463k cr=315M turns=212 peak=281k relays=1`. simmer rewrites the file at most every 2 s while the lane runs (`running: true`), so a watchdog can read it. Claude, Pi and OpenCode report usage per model call, so they get `turns` and `peakContext`; the other harnesses report `null` there.
+- `--context-ceiling <tokens>` relays the lane to a fresh agent when one model call's context passes the ceiling (Claude only; other harnesses ignore it with a warning). simmer adds a relay rule to the brief. At the ceiling it asks the agent, through a `PostToolUse` hook at the next tool boundary, to commit finished work, write a handoff and end with the line `RELAY-HANDOFF`. The fresh agent gets the brief plus that handoff. An agent that keeps working 20 turns after the request is stopped right after a tool call returns, and the fresh agent starts from git and the lane log. `--max-relays` caps relays (default 3). The last agent runs without a ceiling, and the report says so. The hook adds to the user's hooks; it does not replace them.
 
 | Harness | `--model` | `--effort` |
 |---|---|---|
@@ -144,7 +147,7 @@ Managed Codex `Stop` and `SessionEnd` hooks sweep the rollout separately.
 ### Add a harness
 
 1. Add `src/harness/<name>.ts` with `run(options: RunOptions)`. Use `runProcess` to read its event stream. Use `workerPrompt` for the prompt: it adds stage instructions for cook-it runs when the CLI does not support Claude's role agents.
-2. Add one entry to `src/harness/registry.ts`. Set `defaultBinary`, `run`, `defaultModels`, and `supportsEffort`. Use `{ reviewer: 'claude:opus' }` for the default reviewer on non-Claude harnesses. Pass `model` and `effort` to the CLI's own flags for `simmer lane`, and use `workerPrompt(options)` for the prompt.
+2. Add one entry to `src/harness/registry.ts`. Set `defaultBinary`, `run`, `defaultModels`, `supportsEffort`, and `supportsRelay`. Use `{ reviewer: 'claude:opus' }` for the default reviewer on non-Claude harnesses. Pass `model` and `effort` to the CLI's own flags for `simmer lane`, and use `workerPrompt(options)` for the prompt.
 3. Add adapter tests in `test/harness.test.ts` or a new test file. Cover invocation, final text, usage, and failure handling.
 4. Add one row to the harness table above and to the lane flag table.
 5. Run `bun install --frozen-lockfile && bun run gate`.

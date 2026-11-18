@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Harness } from '../src/config'
-import { parseLaneArgs } from '../src/lane'
+import { type LaneUsage, parseLaneArgs, RELAY_GRACE_TURNS, usageSummary } from '../src/lane'
 
 const cliPath = join(import.meta.dir, '..', 'src/cli.ts')
 let directory: string
@@ -65,6 +65,9 @@ test('parses defaults', () => {
     model: undefined,
     effort: undefined,
     out: undefined,
+    usageOut: undefined,
+    contextCeiling: undefined,
+    maxRelays: 3,
     watchdogMinutes: 45,
     timeoutMinutes: 720,
     json: false
@@ -85,6 +88,12 @@ test('parses every flag', () => {
       'high',
       '--out',
       'out.txt',
+      '--usage-out',
+      'usage.json',
+      '--context-ceiling',
+      '150000',
+      '--max-relays',
+      '0',
       '--watchdog-minutes',
       '10',
       '--timeout-minutes',
@@ -98,6 +107,9 @@ test('parses every flag', () => {
     model: 'gpt-5.5',
     effort: 'high',
     out: 'out.txt',
+    usageOut: 'usage.json',
+    contextCeiling: 150000,
+    maxRelays: 0,
     watchdogMinutes: 10,
     timeoutMinutes: 0.5,
     json: true
@@ -123,6 +135,14 @@ test('rejects bad arguments', () => {
     ).toThrow('--timeout-minutes must be a positive number')
   }
   expect(() => parseLaneArgs(['brief.md', '--worktree', 'wt', '--bogus'])).toThrow()
+  for (const tokens of ['0', '-5', '1.5', 'many', '']) {
+    expect(() =>
+      parseLaneArgs(['brief.md', '--worktree', 'wt', `--context-ceiling=${tokens}`])
+    ).toThrow('--context-ceiling must be a whole number of at least 1')
+  }
+  expect(() => parseLaneArgs(['brief.md', '--worktree', 'wt', '--max-relays=-1'])).toThrow(
+    '--max-relays must be a whole number of at least 0'
+  )
 })
 
 test('fails clearly when the worktree does not exist', () => {
@@ -280,4 +300,224 @@ test('the overall timeout kills a busy harness', () => {
   ])
   expect(result.exitCode).toBe(124)
   expect(result.stderr).toBe('simmer lane: timed out after 0.005 minutes\n')
+})
+
+// A fake Claude Code for relay tests. Each turn prints an assistant message with the given context,
+// then a tool result. After a tool result it acts like the relay hook: when simmer wrote the relay
+// file, it takes it and hands the reason to the agent. MODE picks how the agent answers it.
+function relayClaude(mode: 'handoff' | 'ignore', contexts: number[]) {
+  return `
+import { appendFileSync, existsSync, readFileSync, renameSync } from 'node:fs'
+const prompt = process.argv[process.argv.indexOf('-p') + 1]
+const run = (existsSync('runs') ? readFileSync('runs', 'utf8').split('\\n').length - 1 : 0) + 1
+appendFileSync('runs', run + '\\n')
+writeFileSync('prompt-' + run + '.txt', prompt)
+writeFileSync('relay-file-' + run + '.txt', process.env.SIMMER_RELAY_FILE ?? 'unset')
+const say = (event) => process.stdout.write(JSON.stringify(event) + '\\n')
+async function hook() {
+  const file = process.env.SIMMER_RELAY_FILE
+  for (let i = 0; file && i < 50 && !existsSync(file); i++) await Bun.sleep(10)
+  if (!file || !existsSync(file)) return undefined
+  renameSync(file, file + '.sent')
+  return JSON.parse(readFileSync(file + '.sent', 'utf8')).reason
+}
+const contexts = run === 1 ? ${JSON.stringify(contexts)} : [1000]
+let asked
+for (let turn = 0; turn < contexts.length || (asked && ${JSON.stringify(mode)} === 'ignore'); turn++) {
+  const context = contexts[Math.min(turn, contexts.length - 1)]
+  say({ type: 'assistant', message: { id: run + '-' + turn, content: [{ type: 'tool_use' }],
+    usage: { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: context - 10 } } })
+  say({ type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } })
+  asked ??= await hook()
+  if (asked) writeFileSync('asked-' + run + '.txt', asked)
+  if (asked && ${JSON.stringify(mode)} === 'handoff') break
+  if (turn > 200) break
+  await Bun.sleep(5)
+}
+const text = asked && ${JSON.stringify(mode)} === 'handoff'
+  ? 'Done: step one, commit abc123.\\nNext: step two.\\n\\nRELAY-HANDOFF'
+  : 'FINISHED run ' + run
+say({ type: 'result', result: text,
+  usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2000 } })
+`
+}
+
+function readJson(file: string): LaneUsage {
+  return JSON.parse(readFileSync(file, 'utf8'))
+}
+
+test('usageSummary is the compact ledger string', () => {
+  expect(
+    usageSummary({
+      inputTokens: 1,
+      outputTokens: 463_200,
+      cacheReadTokens: 315_400_000,
+      cacheWriteTokens: 0,
+      turns: 212,
+      peakContext: 281_000,
+      relays: 1
+    })
+  ).toBe('out=463k cr=315M turns=212 peak=281k relays=1')
+  expect(
+    usageSummary({
+      inputTokens: 0,
+      outputTokens: 950,
+      cacheReadTokens: 2_345_678,
+      cacheWriteTokens: 0,
+      turns: null,
+      peakContext: null,
+      relays: 0
+    })
+  ).toBe('out=950 cr=2.3M relays=0')
+})
+
+test('--usage-out writes turns, peak context, and the ledger summary', () => {
+  fake('claude', relayClaude('handoff', [3000, 5000, 4000]))
+  const usage = join(directory, 'usage.json')
+  const result = lane([brief, '--worktree', worktree, '--usage-out', usage])
+  expect(result.exitCode).toBe(0)
+  expect(result.stdout).toBe('FINISHED run 1\n')
+  expect(result.stderr).toBe(
+    'simmer lane: usage: input 10, output 5, cache read 2000, cache write 0, turns 3, peak context 5000\n'
+  )
+  expect(readJson(usage)).toMatchObject({
+    running: false,
+    harness: 'claude',
+    turns: 3,
+    peakContext: 5000,
+    outputTokens: 5,
+    cacheReadTokens: 2000,
+    relays: 0,
+    contextCeiling: null,
+    runs: [{ ended: 'done', exitCode: 0, turns: 3, peakContext: 5000 }],
+    summary: 'out=5 cr=2k turns=3 peak=5k relays=0'
+  })
+  // Without a ceiling the brief goes to the harness unchanged and no relay hook is set.
+  expect(readFileSync(join(worktree, 'prompt-1.txt'), 'utf8')).toBe(readFileSync(brief, 'utf8'))
+  expect(readFileSync(join(worktree, 'relay-file-1.txt'), 'utf8')).toBe('unset')
+})
+
+test('a relay hands off at the ceiling and a fresh agent continues from the handoff', () => {
+  fake('claude', relayClaude('handoff', [3000, 9000, 9500, 9800]))
+  const usage = join(directory, 'usage.json')
+  const out = join(directory, 'report.md')
+  const result = lane([
+    brief,
+    '--worktree',
+    worktree,
+    '--context-ceiling',
+    '8000',
+    '--usage-out',
+    usage,
+    '--out',
+    out
+  ])
+  expect(result.exitCode).toBe(0)
+  expect(readFileSync(join(worktree, 'runs'), 'utf8')).toBe('1\n2\n')
+  expect(readFileSync(join(worktree, 'asked-1.txt'), 'utf8')).toBe(
+    'SIMMER RELAY: your context is 9000 tokens, past the ceiling of 8000. Follow the relay rule in your brief now.'
+  )
+  const first = readFileSync(join(worktree, 'prompt-1.txt'), 'utf8')
+  expect(first).toStartWith(readFileSync(brief, 'utf8'))
+  expect(first).toContain('## Relay rule (from simmer, the tool that runs you)')
+  expect(first).toContain('context ceiling of 8000 tokens')
+  expect(first).not.toContain('## Relay 1')
+  const second = readFileSync(join(worktree, 'prompt-2.txt'), 'utf8')
+  expect(second).toStartWith(readFileSync(brief, 'utf8'))
+  expect(second).toContain('## Relay 1 of at most 3')
+  expect(second).toContain('<handoff>\nDone: step one, commit abc123.\nNext: step two.\n</handoff>')
+  expect(second).not.toContain('RELAY-HANDOFF\n</handoff>')
+  expect(readFileSync(out, 'utf8')).toBe(
+    'FINISHED run 2\n\n---\nsimmer lane: this run used 1 relay(s) at a context ceiling of 8000 tokens (at most 3).'
+  )
+  expect(result.stderr).toContain('context 9000 passed the ceiling 8000; asked for a relay handoff')
+  expect(result.stderr).toContain('relay 1 of at most 3: starting a fresh agent')
+  expect(result.stderr).toEndWith(
+    'usage: input 20, output 10, cache read 4000, cache write 0, turns 3, peak context 9000, relays 1\n'
+  )
+  expect(readJson(usage)).toMatchObject({
+    running: false,
+    turns: 3,
+    peakContext: 9000,
+    relays: 1,
+    maxRelays: 3,
+    contextCeiling: 8000,
+    runs: [
+      { ended: 'relay', turns: 2, peakContext: 9000 },
+      { ended: 'done', turns: 1, peakContext: 1000 }
+    ],
+    summary: 'out=10 cr=4k turns=3 peak=9k relays=1'
+  })
+  // simmer removes its relay folder.
+  const relayFile = readFileSync(join(worktree, 'relay-file-1.txt'), 'utf8')
+  expect(existsSync(join(relayFile, '..'))).toBe(false)
+})
+
+test('the relay cap lets the last agent run past the ceiling', () => {
+  fake('claude', relayClaude('handoff', [9000, 9000]))
+  const out = join(directory, 'report.md')
+  const result = lane([
+    brief,
+    '--worktree',
+    worktree,
+    '--context-ceiling',
+    '8000',
+    '--max-relays',
+    '1',
+    '--out',
+    out
+  ])
+  expect(result.exitCode).toBe(0)
+  expect(readFileSync(join(worktree, 'runs'), 'utf8')).toBe('1\n2\n')
+  const second = readFileSync(join(worktree, 'prompt-2.txt'), 'utf8')
+  expect(second).toContain('## Relay 1 of at most 1')
+  expect(second).not.toContain('## Relay rule')
+  expect(readFileSync(join(worktree, 'relay-file-2.txt'), 'utf8')).toBe('unset')
+  expect(readFileSync(out, 'utf8')).toEndWith(
+    '(at most 1). That is the cap, so the last agent ran without a ceiling.'
+  )
+})
+
+test('an agent that ignores the relay request is stopped after a tool call', () => {
+  fake('claude', relayClaude('ignore', [9000]))
+  const usage = join(directory, 'usage.json')
+  const result = lane([
+    brief,
+    '--worktree',
+    worktree,
+    '--context-ceiling',
+    '8000',
+    '--usage-out',
+    usage
+  ])
+  expect(result.exitCode).toBe(0)
+  expect(result.stdout).toStartWith('FINISHED run 2\n')
+  expect(result.stderr).toContain(
+    `no handoff ${RELAY_GRACE_TURNS} turns after the relay request; stopping the agent after a tool call`
+  )
+  const second = readFileSync(join(worktree, 'prompt-2.txt'), 'utf8')
+  expect(second).toContain('It did not stop when asked, so simmer stopped it')
+  expect(second).not.toContain('<handoff>')
+  const report = readJson(usage)
+  expect(report.relays).toBe(1)
+  expect(report.runs[0]?.ended).toBe('stopped')
+  expect(report.runs[0]?.turns).toBeGreaterThanOrEqual(RELAY_GRACE_TURNS + 1)
+})
+
+test('a harness without relay support ignores the ceiling with a warning', () => {
+  fake('gemini', '')
+  const result = lane([
+    brief,
+    '--worktree',
+    worktree,
+    '--harness',
+    'gemini',
+    '--context-ceiling',
+    '8000'
+  ])
+  expect(result.stderr).toContain(
+    'simmer lane: gemini cannot relay at a context ceiling; ignoring --context-ceiling'
+  )
+  expect(invocation()).toContain(readFileSync(brief, 'utf8'))
+  expect(invocation()).not.toContain('--settings')
 })
