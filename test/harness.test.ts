@@ -12,8 +12,9 @@ import { join } from 'node:path'
 import type { Harness } from '../src/config'
 import { loadConfig } from '../src/config'
 import { runHarness } from '../src/harness'
+import { relaySettings } from '../src/harness/claude'
 import { run as runCodex } from '../src/harness/codex'
-import { rolePrompt } from '../src/harness/process'
+import { rolePrompt, type TurnProgress } from '../src/harness/process'
 import { harnessNames, harnessRegistry } from '../src/harness/registry'
 
 let directory: string
@@ -156,6 +157,8 @@ test('Claude uses unattended flags, role agents, cwd, and empty stdin', async ()
     exitCode: 0,
     finalMessage: 'Done now',
     usage: { inputTokens: 42, outputTokens: 7, cacheReadTokens: 9000, cacheWriteTokens: 300 },
+    turns: 1,
+    peakContext: 11,
     killedByWatchdog: false
   })
   const called = invocation()
@@ -285,6 +288,8 @@ test('Pi uses its configured binary and totals completed assistant usage only', 
     exitCode: 0,
     finalMessage: 'Final Pi',
     usage: { inputTokens: 110, outputTokens: 10, cacheReadTokens: 1100, cacheWriteTokens: 40 },
+    turns: 2,
+    peakContext: 660,
     killedByWatchdog: false
   })
   expect(invocation()).toEqual({
@@ -524,6 +529,8 @@ test.each(harnesses)('%s keeps its final text and usage on nonzero exit', async 
     exitCode: 9,
     finalMessage: 'Failed after work',
     usage: { inputTokens: 25, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    // Pi reports usage per model call, so it knows its turns; the others report one total.
+    ...(harness === 'pi' ? { turns: 1, peakContext: 25 } : {}),
     killedByWatchdog: false
   })
 })
@@ -737,6 +744,8 @@ test('Claude falls back to assistant text and deduplicates usage by message id',
     exitCode: 0,
     finalMessage: 'Complete',
     usage: { inputTokens: 10, outputTokens: 4, cacheReadTokens: 2000, cacheWriteTokens: 150 },
+    turns: 1,
+    peakContext: 2160,
     killedByWatchdog: false
   })
 })
@@ -860,4 +869,156 @@ exit 43
   const result = await filteredCodex()
   expect(result.exitCode).toBe(43)
   expect(result.finalMessage).toBe('')
+})
+
+test('Claude reports turns, peak context, and tool boundaries of the main thread only', async () => {
+  const turn = (id: string, input: number, read: number, write: number) => ({
+    type: 'assistant',
+    message: {
+      id,
+      content: [{ type: 'tool_use', name: 'Bash' }],
+      usage: {
+        input_tokens: input,
+        output_tokens: 1,
+        cache_read_input_tokens: read,
+        cache_creation_input_tokens: write
+      }
+    }
+  })
+  const toolResult = (parent?: string) => ({
+    type: 'user',
+    parent_tool_use_id: parent ?? null,
+    message: { content: [{ type: 'tool_result', content: 'ok' }] }
+  })
+  fake(
+    'claude',
+    events([
+      turn('a', 5, 1000, 200),
+      // Claude Code repeats a message once per content block.
+      turn('a', 5, 1000, 200),
+      toolResult(),
+      turn('b', 3, 1400, 100),
+      { ...turn('sub', 1, 90000, 0), parent_tool_use_id: 'tool' },
+      toolResult('tool'),
+      turn('c', 2, 1300, 10),
+      {
+        type: 'result',
+        result: 'Done',
+        usage: { input_tokens: 10, output_tokens: 3, cache_read_input_tokens: 3700 }
+      }
+    ])
+  )
+  const config = await loadConfig(directory)
+  const progress: TurnProgress[] = []
+  let toolResults = 0
+  const result = await harnessRegistry.claude.run({
+    prompt: 'Work.',
+    cwd: directory,
+    binary: config.harnessPaths.claude,
+    watchdogMinutes: 1,
+    onTurn: (value) => progress.push(value),
+    onToolResult: () => toolResults++
+  })
+  expect(result).toMatchObject({ turns: 3, peakContext: 1503, finalMessage: 'Done' })
+  expect(result.usage).toEqual({
+    inputTokens: 10,
+    outputTokens: 3,
+    cacheReadTokens: 3700,
+    cacheWriteTokens: 0
+  })
+  expect(progress.map(({ turns, context, peakContext }) => [turns, context, peakContext])).toEqual([
+    [1, 1205, 1205],
+    [1, 1205, 1205],
+    [2, 1503, 1503],
+    [3, 1312, 1503]
+  ])
+  expect(progress.at(-1)?.usage.cacheReadTokens).toBe(3700)
+  expect(toolResults).toBe(1)
+})
+
+test('Claude adds the relay hook and its file only when a relay file is given', async () => {
+  fake(
+    'claude',
+    `writeFileSync('relay-env.txt', process.env.SIMMER_RELAY_FILE ?? 'unset')\n${events([{ type: 'result', result: 'ok' }])}`
+  )
+  const config = await loadConfig(directory)
+  const options = {
+    prompt: 'Work.',
+    cwd: directory,
+    binary: config.harnessPaths.claude,
+    watchdogMinutes: 1
+  }
+  await harnessRegistry.claude.run(options)
+  expect(invocation().arguments).not.toContain('--settings')
+  expect(readFileSync(join(directory, 'relay-env.txt'), 'utf8')).toBe('unset')
+
+  const file = join(directory, 'relay.json')
+  await harnessRegistry.claude.run({ ...options, relaySignalFile: file })
+  const args = invocation().arguments
+  expect(args[args.indexOf('--settings') + 1]).toBe(relaySettings())
+  expect(readFileSync(join(directory, 'relay-env.txt'), 'utf8')).toBe(file)
+})
+
+test('the relay hook prints the relay file once and is silent without one', () => {
+  const settings = JSON.parse(relaySettings())
+  const command: string = settings.hooks.PostToolUse[0].hooks[0].command
+  expect(settings.hooks.PostToolUse[0].matcher).toBe('')
+  const hook = (file?: string) => {
+    const result = Bun.spawnSync(['bash', '-c', command], {
+      env: { PATH: process.env.PATH ?? '', ...(file ? { SIMMER_RELAY_FILE: file } : {}) }
+    })
+    return { exitCode: result.exitCode, stdout: result.stdout.toString() }
+  }
+  const file = join(directory, 'relay with space.json')
+  expect(hook()).toEqual({ exitCode: 0, stdout: '' })
+  expect(hook(file)).toEqual({ exitCode: 0, stdout: '' })
+  writeFileSync(file, '{"decision":"block","reason":"SIMMER RELAY: stop"}')
+  expect(hook(file)).toEqual({
+    exitCode: 0,
+    stdout: '{"decision":"block","reason":"SIMMER RELAY: stop"}'
+  })
+  expect(existsSync(file)).toBe(false)
+  expect(hook(file)).toEqual({ exitCode: 0, stdout: '' })
+})
+
+test('Pi and OpenCode report one turn per model call', async () => {
+  fake(
+    'pi',
+    events([
+      {
+        type: 'message_end',
+        message: { role: 'assistant', content: [], usage: { input: 4, output: 1, cacheRead: 600 } }
+      },
+      {
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Done' }],
+          usage: { input: 2, output: 1, cacheRead: 900, cacheWrite: 50 }
+        }
+      }
+    ])
+  )
+  expect(await run('pi')).toMatchObject({ turns: 2, peakContext: 952 })
+  fake(
+    'opencode',
+    events([
+      {
+        type: 'step_finish',
+        part: { id: 's1', tokens: { input: 7, output: 1, cache: { read: 300, write: 20 } } }
+      },
+      {
+        type: 'step_finish',
+        part: { id: 's2', tokens: { input: 1, output: 1, cache: { read: 200, write: 0 } } }
+      }
+    ])
+  )
+  expect(await run('opencode')).toMatchObject({ turns: 2, peakContext: 327 })
+})
+
+test('Codex reports no turns or peak context', async () => {
+  fake('codex', events([{ type: 'turn.completed', usage: { input_tokens: 50, output_tokens: 5 } }]))
+  const result = await run('codex')
+  expect(result.turns).toBeUndefined()
+  expect(result.peakContext).toBeUndefined()
 })

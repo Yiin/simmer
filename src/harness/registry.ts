@@ -14,6 +14,8 @@ type HarnessDefinition = {
   defaultModels: RoleModels
   // Whether the adapter passes RunOptions.effort to its CLI.
   supportsEffort: boolean
+  // Whether the adapter delivers RunOptions.relaySignalFile to the model (simmer lane --context-ceiling).
+  supportsRelay: boolean
 }
 
 export const harnessRegistry = {
@@ -21,43 +23,50 @@ export const harnessRegistry = {
     defaultBinary: 'claude',
     run: claude,
     defaultModels: { planner: 'opus', implementer: 'sonnet', reviewer: 'opus', tester: 'opus' },
-    supportsEffort: true
+    supportsEffort: true,
+    supportsRelay: true
   },
   codex: {
     defaultBinary: 'codex',
     run: codex,
     defaultModels: { reviewer: 'claude:opus' },
-    supportsEffort: true
+    supportsEffort: true,
+    supportsRelay: false
   },
   pi: {
     defaultBinary: 'pi',
     run: pi,
     defaultModels: { reviewer: 'claude:opus' },
-    supportsEffort: true
+    supportsEffort: true,
+    supportsRelay: false
   },
   gemini: {
     defaultBinary: 'gemini',
     run: gemini,
     defaultModels: { reviewer: 'claude:opus' },
-    supportsEffort: false
+    supportsEffort: false,
+    supportsRelay: false
   },
   kimi: {
     defaultBinary: 'kimi',
     run: kimi,
     defaultModels: { reviewer: 'claude:opus' },
-    supportsEffort: false
+    supportsEffort: false,
+    supportsRelay: false
   },
   opencode: {
     defaultBinary: 'opencode',
     run: opencode,
     defaultModels: { reviewer: 'claude:opus' },
-    supportsEffort: true
+    supportsEffort: true,
+    supportsRelay: false
   },
   crush: {
     defaultBinary: 'crush',
     run: crush,
     defaultModels: { reviewer: 'claude:opus' },
-    supportsEffort: true
+    supportsEffort: true,
+    supportsRelay: false
   }
 } satisfies Record<string, HarnessDefinition>
 

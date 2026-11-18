@@ -1,4 +1,12 @@
-import { flag, type RunOptions, record, runProcess, usage, workerPrompt } from './process'
+import {
+  contextSize,
+  flag,
+  type RunOptions,
+  record,
+  runProcess,
+  usage,
+  workerPrompt
+} from './process'
 
 export function run(options: RunOptions) {
   let messageId: string | undefined
@@ -49,9 +57,11 @@ export function run(options: RunOptions) {
       }
       // OpenCode reports reasoning separately from output; both count as generated tokens.
       reported.outputTokens += reasoning
+      // One step_finish per model call, so each step is a turn.
       return {
         usage: reported,
-        usageKey: typeof part.id === 'string' ? part.id : undefined
+        usageKey: typeof part.id === 'string' ? part.id : undefined,
+        context: contextSize(reported)
       }
     }
   )

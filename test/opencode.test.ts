@@ -76,6 +76,8 @@ test('OpenCode uses headless flags, writable agent, role prompt, and per-run per
       cacheReadTokens: 49024,
       cacheWriteTokens: 0
     },
+    turns: 3,
+    peakContext: 23776,
     killedByWatchdog: false
   })
 })

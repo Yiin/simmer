@@ -15,7 +15,18 @@ export type HarnessResult = {
   exitCode: number
   finalMessage: string
   usage: Usage | undefined
+  // Model calls on the main thread and the largest prompt one of them sent (input plus cache
+  // read plus cache write). Undefined when the harness stream does not report usage per call.
+  turns?: number
+  peakContext?: number
   killedByWatchdog: boolean
+}
+// Sent after every main-thread model call whose usage the stream reports.
+export type TurnProgress = {
+  turns: number
+  context: number
+  peakContext: number
+  usage: Usage
 }
 export type RunOptions = {
   prompt: string
@@ -30,6 +41,12 @@ export type RunOptions = {
   watchdogIntervalMs?: number
   env?: NodeJS.ProcessEnv
   signal?: AbortSignal
+  onTurn?: (progress: TurnProgress) => void
+  // Called when a main-thread tool call returned: a point where no tool is writing files.
+  onToolResult?: () => void
+  // simmer lane --context-ceiling: the harness delivers this JSON file to the model at the next
+  // tool boundary once it exists (claude only, through a PostToolUse hook).
+  relaySignalFile?: string
 }
 // claude -p exits 0 with an empty result when a hook stops the turn. secret-scrub does that when a
 // tool result held a secret, so the turn did not finish.
@@ -40,6 +57,9 @@ export type StreamEvent = {
   finalMessage?: string
   usage?: Usage
   usageKey?: string
+  // The prompt size of the model call this event reports. usageKey names the call.
+  context?: number
+  toolResult?: boolean
 }
 
 const executeFile = promisify(execFile)
@@ -80,6 +100,22 @@ export function usage(
     cacheReadTokens: cacheRead,
     cacheWriteTokens: cacheWrite
   }
+}
+
+// The prompt size of one model call: uncached input plus what it read from and wrote to the cache.
+export function contextSize(value: Usage | undefined): number | undefined {
+  return value && value.inputTokens + value.cacheReadTokens + value.cacheWriteTokens
+}
+
+export function sumUsage(values: Iterable<Usage>): Usage {
+  const total = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+  for (const value of values) {
+    total.inputTokens += value.inputTokens
+    total.outputTokens += value.outputTokens
+    total.cacheReadTokens += value.cacheReadTokens
+    total.cacheWriteTokens += value.cacheWriteTokens
+  }
+  return total
 }
 
 export function messageText(content: unknown): string | undefined {
@@ -224,6 +260,8 @@ export async function runProcess(
   let eventNumber = 0
   const workerId = randomUUID()
   const tokenUsage = new Map<string, Usage>()
+  const turnContext = new Map<string, number>()
+  let peakContext = 0
   const worker = spawn(command[0] ?? '', command.slice(1), {
     cwd: options.cwd,
     detached: true,
@@ -254,10 +292,22 @@ export async function runProcess(
     const event = parse(record(value))
     if (event.hookStopped) hookStopped = true
     if (event.finalMessage !== undefined) finalMessage = event.finalMessage
+    const key = event.usageKey ?? String(eventNumber++)
     if (event.usage) {
       if (event.usageKey === 'total') tokenUsage.clear()
-      tokenUsage.set(event.usageKey ?? String(eventNumber++), event.usage)
+      tokenUsage.set(key, event.usage)
     }
+    if (event.context !== undefined) {
+      turnContext.set(key, event.context)
+      peakContext = Math.max(peakContext, event.context)
+      options.onTurn?.({
+        turns: turnContext.size,
+        context: event.context,
+        peakContext,
+        usage: sumUsage(tokenUsage.values())
+      })
+    }
+    if (event.toolResult) options.onToolResult?.()
   }
 
   worker.stdout.setEncoding('utf8')
@@ -311,17 +361,9 @@ export async function runProcess(
     return {
       exitCode: hookStopped && exitCode === 0 ? HOOK_STOPPED_EXIT : exitCode,
       finalMessage: parse === 'text' ? finalMessage.trim() : finalMessage,
-      usage: totals.length
-        ? totals.reduce(
-            (total, value) => ({
-              inputTokens: total.inputTokens + value.inputTokens,
-              outputTokens: total.outputTokens + value.outputTokens,
-              cacheReadTokens: total.cacheReadTokens + value.cacheReadTokens,
-              cacheWriteTokens: total.cacheWriteTokens + value.cacheWriteTokens
-            }),
-            { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
-          )
-        : undefined,
+      usage: totals.length ? sumUsage(totals) : undefined,
+      turns: turnContext.size || undefined,
+      peakContext: turnContext.size ? peakContext : undefined,
       killedByWatchdog
     }
   } finally {
