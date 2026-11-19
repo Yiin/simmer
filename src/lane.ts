@@ -41,7 +41,7 @@ Options:
   --out <file>                Also write the final message to this file
   --usage-out <file>          Write usage as JSON to this file, after every turn and at the end
   --context-ceiling <tokens>  Relay to a fresh agent when a turn's context passes this size
-                              (claude only; other harnesses ignore it with a warning)
+                              (claude and agy; other harnesses ignore it with a warning)
   --max-relays <n>            Relays per run at most (default 3); the last agent runs past
                               the ceiling
   --watchdog-minutes <n>      Kill the harness after n silent minutes (default 45)

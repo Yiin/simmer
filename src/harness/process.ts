@@ -10,6 +10,8 @@ export type Usage = {
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  // Reasoning tokens, when the harness reports them apart from output (agy).
+  thinkingTokens?: number
 }
 export type HarnessResult = {
   exitCode: number
@@ -45,7 +47,7 @@ export type RunOptions = {
   // Called when a main-thread tool call returned: a point where no tool is writing files.
   onToolResult?: () => void
   // simmer lane --context-ceiling: the harness delivers this JSON file to the model at the next
-  // tool boundary once it exists (claude only, through a PostToolUse hook).
+  // tool boundary once it exists (claude through a PostToolUse hook, agy through a PreInvocation hook).
   relaySignalFile?: string
 }
 // claude -p exits 0 with an empty result when a hook stops the turn. secret-scrub does that when a
@@ -108,12 +110,15 @@ export function contextSize(value: Usage | undefined): number | undefined {
 }
 
 export function sumUsage(values: Iterable<Usage>): Usage {
-  const total = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+  const total: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
   for (const value of values) {
     total.inputTokens += value.inputTokens
     total.outputTokens += value.outputTokens
     total.cacheReadTokens += value.cacheReadTokens
     total.cacheWriteTokens += value.cacheWriteTokens
+    if (value.thinkingTokens !== undefined) {
+      total.thinkingTokens = (total.thinkingTokens ?? 0) + value.thinkingTokens
+    }
   }
   return total
 }

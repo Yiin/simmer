@@ -1,4 +1,5 @@
 import type { RoleModels } from '../config'
+import { run as agy } from './agy'
 import { run as claude } from './claude'
 import { run as codex } from './codex'
 import { run as crush } from './crush'
@@ -67,6 +68,13 @@ export const harnessRegistry = {
     defaultModels: { reviewer: 'claude:opus' },
     supportsEffort: true,
     supportsRelay: false
+  },
+  agy: {
+    defaultBinary: 'agy',
+    run: agy,
+    defaultModels: { reviewer: 'claude:opus' },
+    supportsEffort: true,
+    supportsRelay: true
   }
 } satisfies Record<string, HarnessDefinition>
 

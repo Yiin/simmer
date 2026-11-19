@@ -2,7 +2,7 @@
 
 simmer runs a bd epic unattended. It takes one ready child at a time, hands it to a fresh headless agent in its own worktree, checks the result, and lands it on the base branch. bd is the only state store, so a crashed run resumes by running the same command again.
 
-It runs on seven harnesses: Claude Code, Codex, Pi, Gemini CLI, Kimi, OpenCode, and Crush. Each one uses your own login or API key for that CLI.
+It runs on eight harnesses: Claude Code, Codex, Pi, Gemini CLI, Kimi, OpenCode, Crush, and Antigravity (`agy`). Each one uses your own login or API key for that CLI.
 
 It replaces `t3 epic cook`. It does not need t3code, forge, or a server.
 
@@ -25,7 +25,7 @@ simmer lane <brief-file> --worktree <dir>
                                   run one free-form brief on one harness; for coordinators
 ```
 
-Common flags: `--harness claude|codex|pi|gemini|kimi|opencode|crush`, `--json` (one JSON event per line on stdout, for forge).
+Common flags: `--harness claude|codex|pi|gemini|kimi|opencode|crush|agy`, `--json` (one JSON event per line on stdout, for forge).
 
 ## One lane
 
@@ -46,8 +46,8 @@ It sends the full text of the brief file as the prompt and nothing else. It does
 - The watchdog kills a harness that prints nothing and makes no commit for 45 minutes. The run stops after 720 minutes in total.
 - Exit codes: 0 on success, 124 on timeout, 125 on a watchdog kill, otherwise the harness exit code. Each failure prints a one-line reason on stderr.
 - `--json` prints a `lane-started` event and a `done` event that holds the final message and usage.
-- `--usage-out <file>` writes usage as JSON: tokens, `turns` (model calls on the main thread), `peakContext` (the largest prompt one call sent: input plus cache read plus cache write), `relays`, one entry per agent run, and `summary`, a compact string for a routing ledger such as `out=463k cr=315M turns=212 peak=281k relays=1`. simmer rewrites the file at most every 2 s while the lane runs (`running: true`), so a watchdog can read it. Claude, Pi and OpenCode report usage per model call, so they get `turns` and `peakContext`; the other harnesses report `null` there.
-- `--context-ceiling <tokens>` relays the lane to a fresh agent when one model call's context passes the ceiling (Claude only; other harnesses ignore it with a warning). simmer adds a relay rule to the brief. At the ceiling it asks the agent, through a `PostToolUse` hook at the next tool boundary, to commit finished work, write a handoff and end with the line `RELAY-HANDOFF`. The fresh agent gets the brief plus that handoff. An agent that keeps working 20 turns after the request is stopped right after a tool call returns, and the fresh agent starts from git and the lane log. `--max-relays` caps relays (default 3). The last agent runs without a ceiling, and the report says so. The hook adds to the user's hooks; it does not replace them.
+- `--usage-out <file>` writes usage as JSON: tokens, `turns` (model calls on the main thread), `peakContext` (the largest prompt one call sent: input plus cache read plus cache write), `relays`, one entry per agent run, and `summary`, a compact string for a routing ledger such as `out=463k cr=315M turns=212 peak=281k relays=1`. simmer rewrites the file at most every 2 s while the lane runs (`running: true`), so a watchdog can read it. Claude, Pi, OpenCode and agy report usage per model call, so they get `turns` and `peakContext`; the other harnesses report `null` there. agy also reports `thinkingTokens`.
+- `--context-ceiling <tokens>` relays the lane to a fresh agent when one model call's context passes the ceiling (Claude and agy; other harnesses ignore it with a warning). simmer adds a relay rule to the brief. At the ceiling it asks the agent, through a `PostToolUse` hook at the next tool boundary (agy: a system message from a `PreInvocation` hook before the next model call), to commit finished work, write a handoff and end with the line `RELAY-HANDOFF`. The fresh agent gets the brief plus that handoff. An agent that keeps working 20 turns after the request is stopped right after a tool call returns, and the fresh agent starts from git and the lane log. `--max-relays` caps relays (default 3). The last agent runs without a ceiling, and the report says so. The hook adds to the user's hooks; it does not replace them.
 
 | Harness | `--model` | `--effort` |
 |---|---|---|
@@ -58,6 +58,7 @@ It sends the full text of the brief file as the prompt and nothing else. It does
 | Kimi | `--model` | not supported |
 | OpenCode | `--model` | `--variant` |
 | Crush | `--model` | `--reasoning-effort` |
+| agy | `--model` | the model's effort suffix (`gemini-4-neon-high` with `--effort low` runs `gemini-4-neon-low`); `--effort` for a model without one |
 
 ## One child, step by step
 
@@ -133,6 +134,7 @@ simmer validates the config shape and non-empty model names. A `claude:` suffix 
 | Kimi | `kimi -p "<prompt>" --output-format stream-json` with stage instructions in the prompt; prompt mode auto-approves |
 | OpenCode | `OPENCODE_PERMISSION='{"*":"allow"}' opencode run --format json --auto --agent build --dir "<worktree>" "<prompt>"` with stage instructions in the prompt |
 | Crush | `CRUSH_CLIENT_SERVER=0 crush run --quiet --cwd <path> <prompt>` with stage instructions in the prompt. Plain text output; token usage is not reported. |
+| agy | `agy -p "<prompt>" --output-format stream-json --dangerously-skip-permissions --add-dir <per-run hooks folder>` with stage instructions in the prompt |
 
 Each adapter returns the exit status, the final message, and token usage.
 `src/harness/registry.ts` defines each harness name, default binary, run function, and default role models.
@@ -143,6 +145,12 @@ Simmer finds the binary on `PATH`, then at `~/.local/share/secret-scrub/secret-s
 A missing binary or unreadable index stops the lane with exit 78 before Codex starts.
 `SIMMER_ALLOW_UNFILTERED=1` permits a run without the filter and prints a warning.
 Managed Codex `Stop` and `SessionEnd` hooks sweep the rollout separately.
+
+agy has no Claude Code hooks, so simmer brings them over. Each run gets a temp folder with an `.agents/hooks.json`, passed with `--add-dir`; agy loads it next to the user's own hooks.
+- agy `PreToolUse` runs the Claude `PreToolUse` hooks from `~/.claude/settings.json` (`SIMMER_CLAUDE_SETTINGS` overrides the path) on each tool call, subagent calls included. A Claude block (exit 2, `deny`, `block`, `continue: false`) becomes agy's `deny`.
+- agy's `PostToolUse` cannot change a tool's output. So before each model call, agy `PreInvocation` runs the Claude `PostToolUse` hooks on the new steps of agy's transcript. When a hook would remove or block text, the run stops before the model reads it and simmer exits 75.
+- A guard that cannot run blocks. With no Claude guard hooks at all, simmer exits 78 before agy starts; `SIMMER_ALLOW_UNFILTERED=1` permits the run and prints a warning.
+- agy reports usage for the main agent only. Subagent tokens are not in the stream.
 
 ### Add a harness
 

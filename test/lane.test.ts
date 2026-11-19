@@ -32,10 +32,10 @@ ${body}
   )
 }
 
-function lane(args: string[]) {
+function lane(args: string[], env: Record<string, string> = {}) {
   const result = Bun.spawnSync([process.execPath, cliPath, 'lane', ...args], {
     cwd: directory,
-    env: { ...process.env, PATH: `${join(directory, 'bin')}:${process.env.PATH ?? ''}` }
+    env: { ...process.env, PATH: `${join(directory, 'bin')}:${process.env.PATH ?? ''}`, ...env }
   })
   return {
     exitCode: result.exitCode,
@@ -170,23 +170,17 @@ const flags: Record<Harness, { model: string[]; effort: string[] }> = {
   gemini: { model: ['--model', 'm1'], effort: [] },
   kimi: { model: ['--model', 'm1'], effort: [] },
   opencode: { model: ['--model', 'm1'], effort: ['--variant', 'high'] },
-  crush: { model: ['--model', 'm1'], effort: ['--reasoning-effort', 'high'] }
+  crush: { model: ['--model', 'm1'], effort: ['--reasoning-effort', 'high'] },
+  agy: { model: ['--model', 'm1'], effort: ['--effort', 'high'] }
 }
 
 for (const [harness, expected] of Object.entries(flags)) {
   test(`${harness} gets the raw brief, the model, and the effort`, () => {
     fake(harness, '')
-    const result = lane([
-      brief,
-      '--worktree',
-      worktree,
-      '--harness',
-      harness,
-      '--model',
-      'm1',
-      '--effort',
-      'high'
-    ])
+    const result = lane(
+      [brief, '--worktree', worktree, '--harness', harness, '--model', 'm1', '--effort', 'high'],
+      harness === 'agy' ? { SIMMER_ALLOW_UNFILTERED: '1' } : {}
+    )
     const args = invocation()
     const text = readFileSync(brief, 'utf8')
     expect(args).toContain(text)
@@ -520,4 +514,70 @@ test('a harness without relay support ignores the ceiling with a warning', () =>
   )
   expect(invocation()).toContain(readFileSync(brief, 'utf8'))
   expect(invocation()).not.toContain('--settings')
+})
+
+// A fake agy for relay tests. Each turn reports a model call with the given context and a tool
+// result, then runs simmer's PreInvocation hook from the per-run hooks.json, as agy does before the
+// next model call. A relay arrives there as a system message, and the agent hands off.
+const relayAgy = `
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
+const prompt = process.argv[process.argv.indexOf('-p') + 1]
+const hookDir = process.argv[process.argv.indexOf('--add-dir') + 1]
+const hooks = JSON.parse(readFileSync(hookDir + '/.agents/hooks.json', 'utf8'))['simmer-guard']
+const run = (existsSync('runs') ? readFileSync('runs', 'utf8').split('\\n').length - 1 : 0) + 1
+appendFileSync('runs', run + '\\n')
+writeFileSync('prompt-' + run + '.txt', prompt)
+const say = (event) => process.stdout.write(JSON.stringify(event) + '\\n')
+const contexts = run === 1 ? [3000, 9000, 9500, 9800] : [1000]
+let asked
+for (let turn = 0; turn < contexts.length; turn++) {
+  say({ event: 'step_update', step_update: { step_index: turn * 2, state: 'DONE', step_type: 'agent_response',
+    usage: { input_tokens: 10, output_tokens: 1, thinking_tokens: 1, cache_read_tokens: contexts[turn] - 10 } } })
+  say({ event: 'step_update', step_update: { step_index: turn * 2 + 1, state: 'DONE', step_type: 'tool', tool_name: 'run_command' } })
+  await Bun.sleep(100)
+  const hook = Bun.spawnSync(['sh', '-c', hooks.PreInvocation[0].command], {
+    stdin: new TextEncoder().encode(JSON.stringify({ hookEventName: 'PreInvocation', conversationId: 'c' + run }))
+  })
+  const answer = JSON.parse(hook.stdout.toString() || '{}')
+  asked = answer.injectSteps?.[0]?.systemMessage?.systemMessage
+  if (asked) { writeFileSync('asked-' + run + '.txt', asked); break }
+}
+const text = asked ? 'Done: commit abc123.\\nNext: step two.\\n\\nRELAY-HANDOFF' : 'FINISHED run ' + run
+say({ event: 'result', result: { status: 'SUCCESS', response: text, num_turns: 1 } })
+`
+
+test('agy relays at the ceiling through its PreInvocation hook', () => {
+  fake('agy', relayAgy)
+  const usage = join(directory, 'usage.json')
+  const result = lane(
+    [
+      brief,
+      '--worktree',
+      worktree,
+      '--harness',
+      'agy',
+      '--context-ceiling',
+      '8000',
+      '--usage-out',
+      usage
+    ],
+    { SIMMER_ALLOW_UNFILTERED: '1' }
+  )
+  expect(result.exitCode).toBe(0)
+  expect(result.stdout).toStartWith('FINISHED run 2\n')
+  expect(readFileSync(join(worktree, 'runs'), 'utf8')).toBe('1\n2\n')
+  expect(readFileSync(join(worktree, 'asked-1.txt'), 'utf8')).toBe(
+    'SIMMER RELAY: your context is 9000 tokens, past the ceiling of 8000. Follow the relay rule in your brief now.'
+  )
+  expect(readFileSync(join(worktree, 'prompt-2.txt'), 'utf8')).toContain(
+    '<handoff>\nDone: commit abc123.\nNext: step two.\n</handoff>'
+  )
+  expect(readJson(usage)).toMatchObject({
+    harness: 'agy',
+    relays: 1,
+    turns: 3,
+    peakContext: 9000,
+    thinkingTokens: 3,
+    runs: [{ ended: 'relay' }, { ended: 'done' }]
+  })
 })
